@@ -1,36 +1,120 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MyHeadsUp
 
-## Getting Started
+MyHeadsUp is a personal dashboard for a self-hosted GitLab instance. It gives
+you a compact overview of saved groups and projects, including:
 
-First, run the development server:
+- open issues
+- open merge requests
+- pipeline schedules
+- latest pipeline status
+
+Saved group entries expand into nested subgroup and project views.
+
+## Configuration
+
+Create `C:\Users\cdroz\Projects\MyHeadsUp\.env.local` with:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+GITLAB_BASE_URL=https://your.gitlab.example.com
+GITLAB_TOKEN=your-personal-access-token
+SONARQUBE_BASE_URL=https://sonarqube.example.com
+SONARQUBE_TOKEN=your-sonarqube-token
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`GITLAB_BASE_URL` should be the root URL of your self-hosted GitLab without
+`/api/v4`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+SonarQube is optional. When configured, enter the exact SonarQube project key
+for a saved project, or edit per-project SonarQube keys directly inside a saved
+group view. Those project SonarQube mappings are written into the saved source
+query so they load back with the group.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Running locally
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Then open [http://localhost:3000](http://localhost:3000).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Running in Docker
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The app now ships with a production Dockerfile that uses Next.js standalone
+output.
 
-## Deploy on Vercel
+```bash
+docker build -t myheadsup .
+docker run --rm -p 3000:3000 \
+  --env-file .env.local \
+  -v myheadsup-data:/app/data \
+  myheadsup
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The `data` directory stores your saved dashboard sources, so mount `/app/data`
+to keep them across container restarts.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+If you prefer explicit flags, `docker run -e ...` still works. `.env.local`
+stays outside the image build context, so secrets are injected only when the
+container starts.
+
+## Running with Compose
+
+```bash
+docker compose --env-file .env.local up -d --build
+```
+
+The checked-in `compose.yaml` includes a development Traefik service, routes
+`http://myheadsup.local` to MyHeadsUp, exposes the Traefik dashboard at
+`http://localhost:8080`, and mounts `./data` to `/app/data` so saved sources
+persist locally.
+
+Add this local hosts entry before starting the stack:
+
+```text
+127.0.0.1 myheadsup.local
+```
+
+On Windows, edit `C:\Windows\System32\drivers\etc\hosts` as Administrator.
+
+## Browser setup fallback
+
+If the app starts without `GITLAB_BASE_URL` and `GITLAB_TOKEN`, the home page
+now shows a setup screen. You can enter the GitLab base URL and token in the
+UI, optionally add SonarQube settings, and those values are saved in your
+browser storage for that browser only.
+
+That browser-stored setup is a fallback for local/self-hosted use. Server
+environment variables remain the preferred option because browser-stored tokens
+are less secure.
+
+## Usage
+
+1. Search the accessible GitLab groups and projects from the combined combobox.
+2. Pick the root result you want, or enter a full path like `platform/backend` or a numeric GitLab ID.
+3. For group queries, optionally add excluded groups and projects from the exclusion picker.
+4. Optionally enter an exact SonarQube project key for that project.
+5. Add the source to the dashboard.
+
+The add-source form builds and saves a simple query-language summary such as:
+
+```text
+Add Group platform/team
+Without Groups platform/team/archive
+Without Projects platform/team/old-service
+```
+
+Excluded groups remove their full subtree from the saved dashboard source.
+
+When you save SonarQube keys for projects inside a group, the saved query grows
+with lines like:
+
+```text
+With SonarQube Project platform/team/api = platform-team-api
+```
+
+The add-source pickers query the GitLab API with your configured token and
+caches recent suggestion results briefly in the app process.
+
+Saved sources are stored locally in `data\sources.json`, which is ignored by
+git.

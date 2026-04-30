@@ -1,0 +1,13 @@
+http:
+  routers:
+    myheadsup:
+      rule: Host(`myheadsup.localhost`)
+      entryPoints:
+        - web
+      service: myheadsup
+
+  services:
+    myheadsup:
+      loadBalancer:
+        servers:
+          - url: http://myheadsup:3000

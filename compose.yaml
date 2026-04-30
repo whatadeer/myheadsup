@@ -1,0 +1,33 @@
+name: myheadsup
+
+services:
+  myheadsup:
+    container_name: myheadsup
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      GITLAB_BASE_URL: ${GITLAB_BASE_URL:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      SONARQUBE_BASE_URL: ${SONARQUBE_BASE_URL:-}
+      SONARQUBE_TOKEN: ${SONARQUBE_TOKEN:-}
+    expose:
+      - "3000"
+    volumes:
+      - ./data:/app/data
+
+  traefik:
+    image: traefik:v3.5
+    container_name: myheadsup-traefik
+    restart: unless-stopped
+    depends_on:
+      - myheadsup
+    command:
+      - --api.insecure=true
+      - --providers.file.filename=/etc/traefik/dynamic/dev.yaml
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - ./traefik/dev.yaml:/etc/traefik/dynamic/dev.yaml:ro

@@ -41,6 +41,7 @@ type GitLabMergeRequestResponse = {
   id: number;
   iid: number;
   title: string;
+  detailed_merge_status?: string | null;
   updated_at: string | null;
   web_url: string;
   assignees?: Array<{
@@ -51,6 +52,10 @@ type GitLabMergeRequestResponse = {
     name?: string | null;
     username?: string | null;
   }> | null;
+};
+
+type GitLabMergeRequestApprovalResponse = {
+  approved: boolean;
 };
 
 type GitLabIssueResponse = {
@@ -201,27 +206,51 @@ export async function fetchOpenMergeRequests(
   items: MergeRequestSummary[];
 }> {
   const mergeRequests = await fetchAllPages<GitLabMergeRequestResponse>(
-    `/projects/${projectId}/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100`,
+    `/projects/${projectId}/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100&with_merge_status_recheck=true`,
     runtimeConfig,
+  );
+  const items = await Promise.all(
+    mergeRequests.map(async (mergeRequest) => {
+      const approvalStatus = await fetchMergeRequestApprovalStatus(
+        projectId,
+        mergeRequest.iid,
+        runtimeConfig,
+      );
+
+      return {
+        assigneeNames: extractParticipantNames(mergeRequest.assignees),
+        id: mergeRequest.id,
+        iid: mergeRequest.iid,
+        isApproved: approvalStatus.approved,
+        isUnassigned:
+          !mergeRequest.assignees ||
+          mergeRequest.assignees.every(
+            (assignee) => !assignee.name?.trim() && !assignee.username?.trim(),
+          ),
+        needsRebase: mergeRequest.detailed_merge_status === "rebase_needed",
+        reviewerNames: extractParticipantNames(mergeRequest.reviewers),
+        title: mergeRequest.title,
+        updatedAt: mergeRequest.updated_at,
+        webUrl: mergeRequest.web_url,
+      };
+    }),
   );
 
   return {
-    count: mergeRequests.length,
-    items: mergeRequests.map((mergeRequest) => ({
-      assigneeNames: extractParticipantNames(mergeRequest.assignees),
-      id: mergeRequest.id,
-      iid: mergeRequest.iid,
-      isUnassigned:
-        !mergeRequest.assignees ||
-        mergeRequest.assignees.every(
-          (assignee) => !assignee.name?.trim() && !assignee.username?.trim(),
-        ),
-      reviewerNames: extractParticipantNames(mergeRequest.reviewers),
-      title: mergeRequest.title,
-      updatedAt: mergeRequest.updated_at,
-      webUrl: mergeRequest.web_url,
-    })),
+    count: items.length,
+    items,
   };
+}
+
+async function fetchMergeRequestApprovalStatus(
+  projectId: number,
+  mergeRequestIid: number,
+  runtimeConfig?: RuntimeConfig | null,
+) {
+  return fetchGitLab<GitLabMergeRequestApprovalResponse>(
+    `/projects/${projectId}/merge_requests/${mergeRequestIid}/approvals`,
+    runtimeConfig,
+  );
 }
 
 export async function fetchOpenIssues(

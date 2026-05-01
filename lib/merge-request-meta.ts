@@ -5,12 +5,12 @@ export function formatMergeRequestMeta(mergeRequest: MergeRequestSummary) {
   const assigneeLabel = mergeRequest.assigneeNames.length
     ? `Assigned to ${mergeRequest.assigneeNames.join(", ")}`
     : null;
+  const statusLabels = [
+    mergeRequest.isApproved ? "Approved" : "Needs approval",
+    mergeRequest.needsRebase ? "Needs rebase" : null,
+  ].filter((label): label is string => Boolean(label));
 
-  if (assigneeLabel) {
-    return `${assigneeLabel} - ${reviewerLabel}`;
-  }
-
-  return reviewerLabel;
+  return [...statusLabels, assigneeLabel, reviewerLabel].filter(Boolean).join(" - ");
 }
 
 function formatReviewerLabel(reviewerNames: string[]) {

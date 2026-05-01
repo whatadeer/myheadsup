@@ -5,10 +5,14 @@ you a compact overview of saved groups and projects, including:
 
 - open issues
 - open merge requests
+- reviewer status on merge requests
 - pipeline schedules
 - latest pipeline status
+- SonarQube quality and recent trends
 
-Saved group entries expand into nested subgroup and project views.
+Saved group entries expand into nested subgroup and project views. Project views
+show tabbed detail for issues, merge requests, and schedules, alongside
+pipeline activity and optional SonarQube data.
 
 ## Configuration
 
@@ -65,17 +69,12 @@ docker compose --env-file .env.local up -d --build
 ```
 
 The checked-in `compose.yaml` includes a development Traefik service, routes
-`http://myheadsup.local` to MyHeadsUp, exposes the Traefik dashboard at
+`http://myheadsup.localhost` to MyHeadsUp, exposes the Traefik dashboard at
 `http://localhost:8080`, and mounts `./data` to `/app/data` so saved sources
 persist locally.
 
-Add this local hosts entry before starting the stack:
-
-```text
-127.0.0.1 myheadsup.local
-```
-
-On Windows, edit `C:\Windows\System32\drivers\etc\hosts` as Administrator.
+Because the local route uses `.localhost`, you do **not** need to add a hosts
+file entry.
 
 ## Browser setup fallback
 
@@ -90,10 +89,10 @@ are less secure.
 
 ## Usage
 
-1. Search the accessible GitLab groups and projects from the combined combobox.
+1. Search the accessible GitLab groups and projects from the combined picker, or paste a saved source query directly into the query box.
 2. Pick the root result you want, or enter a full path like `platform/backend` or a numeric GitLab ID.
 3. For group queries, optionally add excluded groups and projects from the exclusion picker.
-4. Optionally enter an exact SonarQube project key for that project.
+4. Optionally enter an exact SonarQube project key for a saved project.
 5. Add the source to the dashboard.
 
 The add-source form builds and saves a simple query-language summary such as:
@@ -113,8 +112,20 @@ with lines like:
 With SonarQube Project platform/team/api = platform-team-api
 ```
 
+You can also paste an existing saved source query back into the form and the
+app will parse it when adding the source.
+
 The add-source pickers query the GitLab API with your configured token and
 caches recent suggestion results briefly in the app process.
 
 Saved sources are stored locally in `data\sources.json`, which is ignored by
 git.
+
+## Refresh behavior
+
+The dashboard performs an initial live load when the page opens.
+
+Automatic refresh is off by default. Use the control in the top-right corner to
+switch between **Auto refresh** and **Auto refresh off**. Use **Refresh now**
+for a manual reload; the button briefly disables itself after each manual
+refresh.

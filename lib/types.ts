@@ -83,6 +83,8 @@ export type MergeRequestSummary = {
   assigneeNames: string[];
   reviewerNames: string[];
   isUnassigned: boolean;
+  isApproved: boolean;
+  needsRebase: boolean;
 };
 
 export type IssueSummary = {

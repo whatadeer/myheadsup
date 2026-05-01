@@ -729,11 +729,6 @@ function GroupSourceCard({
             <span className="badge">group</span>
           </div>
           <SourceQueryDisclosure label="Group definition" query={savedSource.query} />
-          <p className="source-subtitle">
-            <a className="link" href={group.webUrl} rel="noreferrer" target="_blank">
-              {group.fullPath}
-            </a>
-          </p>
           <div className="meta-list">
             <span>{group.summary.projectCount} projects tracked</span>
             <span>{group.subgroups.length} nested groups</span>

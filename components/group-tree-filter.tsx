@@ -25,6 +25,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showMergeRequestsOnly, setShowMergeRequestsOnly] = useState(false);
   const [showUnassignedMergeRequestsOnly, setShowUnassignedMergeRequestsOnly] = useState(false);
+  const [showSchedulesOnly, setShowSchedulesOnly] = useState(false);
   const visibleGroup = useMemo(
     () =>
       filterGroupNode(
@@ -34,6 +35,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
         showIssuesOnly,
         showMergeRequestsOnly,
         showUnassignedMergeRequestsOnly,
+        showSchedulesOnly,
       ),
     [
       group,
@@ -42,6 +44,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
       showIssuesOnly,
       showMergeRequestsOnly,
       showUnassignedMergeRequestsOnly,
+      showSchedulesOnly,
     ],
   );
 
@@ -101,12 +104,25 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
           value={group.summary.unassignedMergeRequests}
         />
         <MetricCard
+          active={showSchedulesOnly}
+          detail={
+            group.summary.schedules.total
+              ? showSchedulesOnly
+                ? "Showing only projects with schedules"
+                : "Click to filter projects with schedules"
+              : "No schedules in this group"
+          }
           label="Schedules"
-          value={group.summary.schedules.total}
-          detail={`${group.summary.schedules.active} active of ${group.summary.schedules.total}`}
+          onClick={
+            group.summary.schedules.total
+              ? () => setShowSchedulesOnly((currentValue) => !currentValue)
+              : undefined
+          }
+          value={`${group.summary.schedules.active} of ${group.summary.schedules.total}`}
         />
-        <MetricCard label="Projects" value={group.summary.projectCount} />
       </div>
+
+      <NextScheduledRuns group={group} />
 
       <div className="summary-stack">
         <PipelineHistogram
@@ -176,6 +192,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
             {showIssuesOnly ? " with open issues" : ""}
             {showMergeRequestsOnly ? " with open merge requests" : ""}
             {showUnassignedMergeRequestsOnly ? " with unassigned merge requests" : ""}
+            {showSchedulesOnly ? " with schedules" : ""}
             {selectedStatus ? ` ${labelPipeline(selectedStatus).toLowerCase()}` : ""}
             {selectedDate ? ` on ${formatSelectedDate(selectedDate)}` : ""}
             {" "}
@@ -541,19 +558,21 @@ function filterGroupNode(
   showIssuesOnly: boolean,
   showMergeRequestsOnly: boolean,
   showUnassignedMergeRequestsOnly: boolean,
+  showSchedulesOnly: boolean,
 ): VisibleGroupNode {
   if (
     !selectedStatus &&
     !selectedDate &&
     !showIssuesOnly &&
     !showMergeRequestsOnly &&
-    !showUnassignedMergeRequestsOnly
+    !showUnassignedMergeRequestsOnly &&
+    !showSchedulesOnly
   ) {
     return {
       ...group,
       projects: group.projects,
       subgroups: group.subgroups.map((subgroup) =>
-        filterGroupNode(subgroup, null, null, false, false, false),
+        filterGroupNode(subgroup, null, null, false, false, false, false),
       ),
     };
   }
@@ -572,13 +591,17 @@ function filterGroupNode(
       const matchesUnassignedMergeRequests = showUnassignedMergeRequestsOnly
         ? project.unassignedMergeRequests > 0
         : true;
+      const matchesSchedules = showSchedulesOnly
+        ? project.schedules.total > 0
+        : true;
 
       return (
         matchesStatus &&
         matchesDate &&
         matchesIssues &&
         matchesMergeRequests &&
-        matchesUnassignedMergeRequests
+        matchesUnassignedMergeRequests &&
+        matchesSchedules
       );
     }),
     subgroups: group.subgroups
@@ -590,6 +613,7 @@ function filterGroupNode(
           showIssuesOnly,
           showMergeRequestsOnly,
           showUnassignedMergeRequestsOnly,
+          showSchedulesOnly,
         ),
       )
       .filter((subgroup) => subgroup.projects.length || subgroup.subgroups.length),
@@ -652,6 +676,71 @@ function hasPipelineActivityOnDate(project: ProjectSummary, selectedDate: string
     (bucket) => bucket.date === selectedDate && bucket.count > 0,
   );
 }
+
+type NextRunEntry = {
+  project: ProjectSummary;
+  schedule: ProjectSummary["schedules"]["upcoming"][number];
+};
+
+function collectNextRuns(group: GroupNode): NextRunEntry[] {
+  const entries: NextRunEntry[] = [];
+
+  const walk = (node: GroupNode) => {
+    for (const project of node.projects) {
+      const next = project.schedules.upcoming.find((schedule) => schedule.nextRunAt);
+      if (next) {
+        entries.push({ project, schedule: next });
+      }
+    }
+    for (const subgroup of node.subgroups) {
+      walk(subgroup);
+    }
+  };
+
+  walk(group);
+
+  return entries.sort((left, right) =>
+    String(left.schedule.nextRunAt).localeCompare(String(right.schedule.nextRunAt)),
+  );
+}
+
+function NextScheduledRuns({ group }: Readonly<{ group: GroupNode }>) {
+  const entries = useMemo(() => collectNextRuns(group), [group]);
+
+  if (!entries.length) {
+    return null;
+  }
+
+  return (
+    <details className="next-runs">
+      <summary className="next-runs-summary">
+        <span className="section-heading">Next scheduled runs</span>
+        <span className="helper-text">{entries.length} project{entries.length === 1 ? "" : "s"}</span>
+      </summary>
+      <div className="next-runs-body">
+        <ul className="next-runs-list">
+          {entries.map(({ project, schedule }) => (
+            <li className="next-runs-item" key={`${project.id}-${schedule.id}`}>
+              <a
+                className="next-runs-project"
+                href={pipelineSchedulesUrl(project.webUrl)}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {project.name}
+              </a>
+              <span className="next-runs-detail">
+                {schedule.description || schedule.ref || `Schedule ${schedule.id}`}
+              </span>
+              <span className="next-runs-when">{formatScheduleDate(schedule.nextRunAt)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
 
 function formatSelectedDate(value: string) {
   return new Intl.DateTimeFormat("en", {

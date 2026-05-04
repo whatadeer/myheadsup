@@ -68,13 +68,36 @@ export function PipelineHistogram({
 
           return (
             <div className={`histogram-column${selectionClass}`} key={bucket.date}>
-              {onSelectDate ? (
-                <button
-                  aria-label={title}
-                  className="histogram-bar-button"
-                  onClick={() => onSelectDate(bucket.date)}
-                  type="button"
-                >
+              <div className="histogram-bar-shell">
+                {onSelectDate ? (
+                  <button
+                    aria-label={title}
+                    className="histogram-bar-button"
+                    onClick={() => onSelectDate(bucket.date)}
+                    type="button"
+                  >
+                    <span className="histogram-bar" style={{ height: `${height}%` }} title={title}>
+                      {otherPercent > 0 ? (
+                        <span
+                          className="histogram-segment histogram-bar-other"
+                          style={{ height: `${otherPercent}%` }}
+                        />
+                      ) : null}
+                      {successPercent > 0 ? (
+                        <span
+                          className="histogram-segment histogram-bar-active"
+                          style={{ height: `${successPercent}%` }}
+                        />
+                      ) : null}
+                      {failedPercent > 0 ? (
+                        <span
+                          className="histogram-segment histogram-bar-failed"
+                          style={{ height: `${failedPercent}%` }}
+                        />
+                      ) : null}
+                    </span>
+                  </button>
+                ) : (
                   <span className="histogram-bar" style={{ height: `${height}%` }} title={title}>
                     {otherPercent > 0 ? (
                       <span
@@ -95,29 +118,8 @@ export function PipelineHistogram({
                       />
                     ) : null}
                   </span>
-                </button>
-              ) : (
-                <span className="histogram-bar" style={{ height: `${height}%` }} title={title}>
-                  {otherPercent > 0 ? (
-                    <span
-                      className="histogram-segment histogram-bar-other"
-                      style={{ height: `${otherPercent}%` }}
-                    />
-                  ) : null}
-                  {successPercent > 0 ? (
-                    <span
-                      className="histogram-segment histogram-bar-active"
-                      style={{ height: `${successPercent}%` }}
-                    />
-                  ) : null}
-                  {failedPercent > 0 ? (
-                    <span
-                      className="histogram-segment histogram-bar-failed"
-                      style={{ height: `${failedPercent}%` }}
-                    />
-                  ) : null}
-                </span>
-              )}
+                )}
+              </div>
               <span className="histogram-value">{bucket.count}</span>
               <span className="histogram-label">{formatHistogramTick(bucket.date)}</span>
             </div>

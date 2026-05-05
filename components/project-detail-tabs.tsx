@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { DependencyVulnerabilityPanel } from "@/components/dependency-vulnerability-panel";
 import { JiraProjectLinks } from "@/components/jira-project-links";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
 import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
@@ -212,6 +213,9 @@ export function ProjectDetailTabs({
             jiraProjectKeys={project.jiraProjectKeys}
             label="Jira projects"
           />
+          {project.dependencyVulnerabilities ? (
+            <DependencyVulnerabilityPanel summary={project.dependencyVulnerabilities} />
+          ) : null}
           <PipelineHistogram
             buckets={project.pipelineActivity}
             label="Pipeline activity (14 days)"

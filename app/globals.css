@@ -1253,6 +1253,24 @@ a.hero-integration:hover {
   border-radius: 16px;
   background: var(--surface-muted);
   border: 1px solid var(--border);
+  scroll-margin-top: 16px;
+}
+
+.project-row-flash {
+  animation: project-row-flash 1.4s ease-out;
+}
+
+@keyframes project-row-flash {
+  0% {
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface-muted));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  100% {
+    border-color: var(--border);
+    background: var(--surface-muted);
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 .project-row-content {

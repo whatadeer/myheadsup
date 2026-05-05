@@ -104,6 +104,21 @@ export type IssueSummary = {
   updatedAt: string | null;
 };
 
+export type DependencyVulnerabilitySummary = {
+  totalCount: number;
+  bySeverity: Record<string, number>;
+  items: DependencyVulnerabilityItem[];
+  issueId: number;
+  issueIid: number;
+  issueTitle: string;
+  issueWebUrl: string;
+};
+
+export type DependencyVulnerabilityItem = {
+  packageName: string;
+  severity: string;
+};
+
 export type SonarProjectSummary = {
   projectKey: string;
   dashboardUrl: string;
@@ -156,6 +171,7 @@ export type ProjectSummary = {
   sonarProjectKey: string | null;
   openIssues: number;
   issues: IssueSummary[];
+  dependencyVulnerabilities: DependencyVulnerabilitySummary | null;
   openMergeRequests: number;
   unassignedMergeRequests: number;
   mergeRequests: MergeRequestSummary[];

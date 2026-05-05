@@ -175,6 +175,7 @@ async function buildProjectSummary(
     sonarProjectKey,
     openIssues: issues.count,
     issues: issues.items,
+    dependencyVulnerabilities: issues.dependencyVulnerabilities,
     openMergeRequests: mergeRequests.count,
     unassignedMergeRequests: mergeRequests.items.filter((mergeRequest) => mergeRequest.isUnassigned)
       .length,

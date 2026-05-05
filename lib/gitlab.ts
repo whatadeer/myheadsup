@@ -1,4 +1,5 @@
 import type {
+  DependencyVulnerabilitySummary,
   GitLabGroupRef,
   GitLabProjectRef,
   IssueSummary,
@@ -16,6 +17,7 @@ import { preferRuntimeValue } from "./runtime-config";
 import { createConcurrencyLimiter } from "./concurrency-limit";
 import { describeRequestError } from "./request-errors";
 import { logServerDebug, logServerError } from "./server-log";
+import { summarizeDependencyVulnerabilities } from "./dependency-vulnerabilities";
 
 type GitLabGroupResponse = {
   id: number;
@@ -64,6 +66,7 @@ type GitLabIssueResponse = {
   id: number;
   iid: number;
   title: string;
+  description?: string | null;
   updated_at: string | null;
   web_url: string;
 };
@@ -262,6 +265,7 @@ export async function fetchOpenIssues(
   runtimeConfig?: RuntimeConfig | null,
 ): Promise<{
   count: number;
+  dependencyVulnerabilities: DependencyVulnerabilitySummary | null;
   items: IssueSummary[];
 }> {
   const issues = await fetchAllPages<GitLabIssueResponse>(
@@ -269,8 +273,19 @@ export async function fetchOpenIssues(
     runtimeConfig,
   );
 
+  const dependencyVulnerabilities = summarizeDependencyVulnerabilities(
+    issues.map((issue) => ({
+      description: issue.description,
+      id: issue.id,
+      iid: issue.iid,
+      title: issue.title,
+      webUrl: issue.web_url,
+    })),
+  );
+
   return {
     count: issues.length,
+    dependencyVulnerabilities,
     items: issues.map((issue) => ({
       id: issue.id,
       iid: issue.iid,

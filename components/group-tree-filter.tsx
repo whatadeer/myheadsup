@@ -1,6 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  CollapsibleRollup,
+} from "@/components/collapsible-rollup";
+import {
+  DependencyVulnerabilityGroupSummary,
+  type DependencyVulnerabilityGroupSummaryEntry,
+} from "@/components/dependency-vulnerability-group-summary";
+import { DependencyVulnerabilityPanel } from "@/components/dependency-vulnerability-panel";
 import { JiraProjectLinks } from "@/components/jira-project-links";
 import { GroupQueryExcludeForm } from "@/components/group-query-exclude-form";
 import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
@@ -39,11 +47,18 @@ export function GroupTreeFilter({
   const [showUnassignedMergeRequestsOnly, setShowUnassignedMergeRequestsOnly] = useState(false);
   const [showSchedulesOnly, setShowSchedulesOnly] = useState(false);
   const [showWithoutSchedulesOnly, setShowWithoutSchedulesOnly] = useState(false);
+  const [showDependencyVulnerabilitiesOnly, setShowDependencyVulnerabilitiesOnly] = useState(false);
+  const [selectedDependencySeverity, setSelectedDependencySeverity] = useState<string | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const projectsWithoutSchedules = useMemo(
     () => countProjects(group, (project) => project.schedules.total === 0),
     [group],
   );
+  const dependencyVulnerabilityCount = useMemo(
+    () => countDependencyVulnerabilities(group),
+    [group],
+  );
+  const dependencySeverityEntries = useMemo(() => collectDependencySeverityEntries(group), [group]);
   const languageEntries = useMemo(() => primaryLanguageEntries(group), [group]);
   const visibleGroup = useMemo(
     () =>
@@ -57,18 +72,26 @@ export function GroupTreeFilter({
         showUnassignedMergeRequestsOnly,
         showSchedulesOnly,
         showWithoutSchedulesOnly,
+        showDependencyVulnerabilitiesOnly,
+        selectedDependencySeverity,
       ),
     [
       group,
       selectedLanguage,
       selectedDate,
       selectedStatus,
+      selectedDependencySeverity,
+      showDependencyVulnerabilitiesOnly,
       showIssuesOnly,
       showMergeRequestsOnly,
       showUnassignedMergeRequestsOnly,
       showSchedulesOnly,
       showWithoutSchedulesOnly,
     ],
+  );
+  const dependencyPackageEntries = useMemo(
+    () => collectDependencyPackageEntries(visibleGroup, selectedDependencySeverity),
+    [selectedDependencySeverity, visibleGroup],
   );
 
   return (
@@ -166,6 +189,50 @@ export function GroupTreeFilter({
           }
           value={projectsWithoutSchedules}
         />
+        <MetricCard
+          active={showDependencyVulnerabilitiesOnly}
+          detail={
+            dependencyVulnerabilityCount
+              ? showDependencyVulnerabilitiesOnly
+                ? "Showing only projects with impacted dependencies"
+                : "Click to filter projects with impacted dependencies"
+              : "No impacted dependencies found in this group"
+          }
+          label="Dependencies impacted"
+          onClick={
+            dependencyVulnerabilityCount
+              ? () => setShowDependencyVulnerabilitiesOnly((currentValue) => !currentValue)
+              : undefined
+          }
+          value={dependencyVulnerabilityCount}
+        />
+      </div>
+
+      <div className="summary-stack">
+        <h3 className="section-heading">Dependency severity</h3>
+        <div className="status-list">
+          <button
+            className={`status-pill status-filter-button${selectedDependencySeverity === null ? " active" : ""}`}
+            onClick={() => setSelectedDependencySeverity(null)}
+            type="button"
+          >
+            All {dependencyVulnerabilityCount}
+          </button>
+          {dependencySeverityEntries.map(([severity, count]) => (
+            <button
+              className={`status-pill status-filter-button${selectedDependencySeverity === severity ? " active" : ""}`}
+              key={severity}
+              onClick={() =>
+                setSelectedDependencySeverity((currentSeverity) =>
+                  currentSeverity === severity ? null : severity,
+                )
+              }
+              type="button"
+            >
+              {severity} {count}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="summary-stack">
@@ -239,6 +306,10 @@ export function GroupTreeFilter({
         onScheduleTriggered={onScheduleTriggered}
         runtimeConfig={runtimeConfig}
       />
+      <DependencyVulnerabilityGroupSummary
+        entries={dependencyPackageEntries}
+        selectedSeverity={selectedDependencySeverity}
+      />
 
       <div className="group-tree">
         {visibleGroup.projects.length ? (
@@ -275,6 +346,11 @@ export function GroupTreeFilter({
             {showUnassignedMergeRequestsOnly ? " with unassigned merge requests" : ""}
             {showSchedulesOnly ? " with schedules" : ""}
             {showWithoutSchedulesOnly ? " without schedules" : ""}
+            {selectedDependencySeverity
+              ? ` with ${selectedDependencySeverity.toLowerCase()} impacted dependencies`
+              : showDependencyVulnerabilitiesOnly
+                ? " with impacted dependencies"
+                : ""}
             {selectedLanguage ? ` for ${selectedLanguage}` : ""}
             {selectedStatus ? ` ${labelPipeline(selectedStatus).toLowerCase()}` : ""}
             {selectedDate ? ` on ${formatSelectedDate(selectedDate)}` : ""}
@@ -378,7 +454,7 @@ function ProjectRow({
   );
 
   return (
-    <article className="project-row">
+    <article className="project-row" id={`project-row-${project.id}`}>
       <div className="project-row-content">
         <div className="project-meta">
           <div className="project-title-row">
@@ -431,6 +507,9 @@ function ProjectRow({
             jiraProjectKeys={project.jiraProjectKeys}
             label="Jira projects"
           />
+          {project.dependencyVulnerabilities ? (
+            <DependencyVulnerabilityPanel summary={project.dependencyVulnerabilities} />
+          ) : null}
           <div className="summary-stack project-tab-shell">
             <div className="section-heading-row">
               <span className="section-heading">Detail tabs</span>
@@ -694,6 +773,8 @@ function filterGroupNode(
   showUnassignedMergeRequestsOnly: boolean,
   showSchedulesOnly: boolean,
   showWithoutSchedulesOnly: boolean,
+  showDependencyVulnerabilitiesOnly: boolean,
+  selectedDependencySeverity: string | null,
 ): VisibleGroupNode {
   if (
     !selectedStatus &&
@@ -703,13 +784,15 @@ function filterGroupNode(
     !showMergeRequestsOnly &&
     !showUnassignedMergeRequestsOnly &&
     !showSchedulesOnly &&
-    !showWithoutSchedulesOnly
+    !showWithoutSchedulesOnly &&
+    !showDependencyVulnerabilitiesOnly &&
+    !selectedDependencySeverity
   ) {
     return {
       ...group,
       projects: group.projects,
       subgroups: group.subgroups.map((subgroup) =>
-        filterGroupNode(subgroup, null, null, null, false, false, false, false, false),
+        filterGroupNode(subgroup, null, null, null, false, false, false, false, false, false, null),
       ),
     };
   }
@@ -737,6 +820,12 @@ function filterGroupNode(
       const matchesWithoutSchedules = showWithoutSchedulesOnly
         ? project.schedules.total === 0
         : true;
+      const matchesDependencyVulnerabilities = showDependencyVulnerabilitiesOnly
+        ? projectHasDependencyVulnerabilities(project)
+        : true;
+      const matchesDependencySeverity = selectedDependencySeverity
+        ? projectHasDependencySeverity(project, selectedDependencySeverity)
+        : true;
 
       return (
         matchesStatus &&
@@ -746,7 +835,9 @@ function filterGroupNode(
         matchesMergeRequests &&
         matchesUnassignedMergeRequests &&
         matchesSchedules &&
-        matchesWithoutSchedules
+        matchesWithoutSchedules &&
+        matchesDependencyVulnerabilities &&
+        matchesDependencySeverity
       );
     }),
     subgroups: group.subgroups
@@ -761,6 +852,8 @@ function filterGroupNode(
           showUnassignedMergeRequestsOnly,
           showSchedulesOnly,
           showWithoutSchedulesOnly,
+          showDependencyVulnerabilitiesOnly,
+          selectedDependencySeverity,
         ),
       )
       .filter((subgroup) => subgroup.projects.length || subgroup.subgroups.length),
@@ -819,20 +912,111 @@ function MetricCard({
   );
 }
 
+function countDependencyVulnerabilities(group: GroupNode) {
+  let total = 0;
+
+  countProjects(group, (project) => {
+    total += project.dependencyVulnerabilities?.totalCount ?? 0;
+    return false;
+  });
+
+  return total;
+}
+
+function collectDependencySeverityEntries(group: GroupNode) {
+  const counts = new Map<string, number>();
+
+  countProjects(group, (project) => {
+    for (const [severity, count] of Object.entries(
+      project.dependencyVulnerabilities?.bySeverity ?? {},
+    )) {
+      counts.set(severity, (counts.get(severity) ?? 0) + count);
+    }
+
+    return false;
+  });
+
+  return [...counts.entries()].sort(
+    (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+  );
+}
+
+function collectDependencyPackageEntries(
+  group: GroupNode,
+  selectedSeverity: string | null,
+): DependencyVulnerabilityGroupSummaryEntry[] {
+  const entries = new Map<
+    string,
+    {
+      bySeverity: Record<string, number>;
+      packageName: string;
+      projects: Map<number, string>;
+      totalCount: number;
+    }
+  >();
+
+  visitProjects(group, (project) => {
+    for (const item of project.dependencyVulnerabilities?.items ?? []) {
+      if (selectedSeverity && item.severity !== selectedSeverity) {
+        continue;
+      }
+
+      const currentEntry = entries.get(item.packageName) ?? {
+        bySeverity: {},
+        packageName: item.packageName,
+        projects: new Map<number, string>(),
+        totalCount: 0,
+      };
+      currentEntry.bySeverity[item.severity] = (currentEntry.bySeverity[item.severity] ?? 0) + 1;
+      currentEntry.projects.set(project.id, project.name);
+      currentEntry.totalCount += 1;
+      entries.set(item.packageName, currentEntry);
+    }
+  });
+
+  return [...entries.values()]
+    .map((entry) => ({
+      bySeverity: entry.bySeverity,
+      packageName: entry.packageName,
+      projects: [...entry.projects.entries()]
+        .map(([id, name]) => ({ id, name }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      totalCount: entry.totalCount,
+    }))
+    .sort(
+      (left, right) =>
+        right.totalCount - left.totalCount || left.packageName.localeCompare(right.packageName),
+    );
+}
+
+function projectHasDependencyVulnerabilities(project: ProjectSummary) {
+  return (project.dependencyVulnerabilities?.totalCount ?? 0) > 0;
+}
+
+function projectHasDependencySeverity(project: ProjectSummary, severity: string) {
+  return (project.dependencyVulnerabilities?.bySeverity[severity] ?? 0) > 0;
+}
+
 function countProjects(group: GroupNode, predicate: (project: ProjectSummary) => boolean) {
   let total = 0;
 
-  for (const project of group.projects) {
+  visitProjects(group, (project) => {
     if (predicate(project)) {
       total += 1;
     }
+  });
+
+  return total;
+}
+
+function visitProjects(group: GroupNode, visitor: (project: ProjectSummary) => void) {
+  for (const project of group.projects) {
+    visitor(project);
   }
 
   for (const subgroup of group.subgroups) {
-    total += countProjects(subgroup, predicate);
+    visitProjects(subgroup, visitor);
   }
-
-  return total;
 }
 
 function primaryLanguageEntries(group: GroupNode) {
@@ -903,38 +1087,35 @@ function NextScheduledRuns({
   }
 
   return (
-    <details className="next-runs">
-      <summary className="next-runs-summary">
-        <span className="section-heading">Next scheduled runs</span>
-        <span className="helper-text">{entries.length} project{entries.length === 1 ? "" : "s"}</span>
-      </summary>
-      <div className="next-runs-body">
-        <ul className="next-runs-list">
-          {entries.map(({ project, schedule }) => (
-            <li className="next-runs-item" key={`${project.id}-${schedule.id}`}>
-              <a
-                className="next-runs-project"
-                href={pipelineSchedulesUrl(project.webUrl)}
-                rel="noreferrer"
-                target="_blank"
-              >
-                {project.name}
-              </a>
-              <span className="next-runs-detail">
-                {schedule.description || schedule.ref || `Schedule ${schedule.id}`}
-              </span>
-              <span className="next-runs-when">{formatScheduleDate(schedule.nextRunAt)}</span>
-              <ScheduleRunButton
-                onTriggered={onScheduleTriggered}
-                projectId={project.id}
-                runtimeConfig={runtimeConfig}
-                scheduleId={schedule.id}
-              />
-            </li>
-          ))}
-        </ul>
-      </div>
-    </details>
+    <CollapsibleRollup
+      detail={`${entries.length} project${entries.length === 1 ? "" : "s"}`}
+      title="Next scheduled runs"
+    >
+      <ul className="next-runs-list">
+        {entries.map(({ project, schedule }) => (
+          <li className="next-runs-item" key={`${project.id}-${schedule.id}`}>
+            <a
+              className="next-runs-project"
+              href={pipelineSchedulesUrl(project.webUrl)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {project.name}
+            </a>
+            <span className="next-runs-detail">
+              {schedule.description || schedule.ref || `Schedule ${schedule.id}`}
+            </span>
+            <span className="next-runs-when">{formatScheduleDate(schedule.nextRunAt)}</span>
+            <ScheduleRunButton
+              onTriggered={onScheduleTriggered}
+              projectId={project.id}
+              runtimeConfig={runtimeConfig}
+              scheduleId={schedule.id}
+            />
+          </li>
+        ))}
+      </ul>
+    </CollapsibleRollup>
   );
 }
 

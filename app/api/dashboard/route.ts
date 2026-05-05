@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { after, NextResponse } from "next/server";
 import { loadBaseSourceDashboard } from "@/lib/dashboard";
+import {
+  isDashboardSnapshotStale,
+  summarizeDashboardSnapshots,
+} from "@/lib/dashboard-snapshot";
 import { readDashboardSnapshotEntries, writeDashboardSnapshot } from "@/lib/dashboard-snapshot-store";
 import { getGitLabConfigError } from "@/lib/gitlab";
 import { parseRuntimeConfigValue } from "@/lib/runtime-config";
@@ -13,8 +17,6 @@ import {
 import { readSources } from "@/lib/store";
 import type {
   DashboardResponsePayload,
-  DashboardSnapshotStatus,
-  DashboardSnapshotSummary,
   RuntimeConfig,
   SavedSource,
   SourceDashboard,
@@ -22,8 +24,8 @@ import type {
 
 export const dynamic = "force-dynamic";
 
-const sourceDashboardSnapshotTtlMs = 30 * 60 * 1000;
 const sourceDashboardRefreshCooldownMs = 30 * 1000;
+const sourceDashboardCacheSchemaVersion = 3;
 const activeSourceDashboardRefreshes = new Map<string, Promise<SourceDashboardRefreshResult>>();
 const recentSourceDashboardRefreshAttempts = new Map<string, number>();
 
@@ -180,6 +182,7 @@ function buildSourceDashboardCacheKey(
   runtimeConfig?: RuntimeConfig | null,
 ) {
   const payload = JSON.stringify({
+    schemaVersion: sourceDashboardCacheSchemaVersion,
     jiraBaseUrl: resolveJiraBaseUrl(runtimeConfig),
     runtimeConfig: runtimeConfig ?? null,
     source: {
@@ -265,52 +268,6 @@ async function runSourceDashboardRefresh(
     baseDashboard,
     fetchedAt,
   };
-}
-
-function summarizeDashboardSnapshots(
-  dashboards: SourceDashboardResult[],
-): DashboardSnapshotSummary {
-  const freshSourceCount = dashboards.filter(
-    (entry) => entry.fetchedAt && !isDashboardSnapshotStale(entry.fetchedAt),
-  ).length;
-  const staleSourceCount = dashboards.filter(
-    (entry) => entry.fetchedAt && isDashboardSnapshotStale(entry.fetchedAt),
-  ).length;
-  const refreshingSourceCount = dashboards.filter((entry) => entry.isRefreshing).length;
-  const missingSourceCount = dashboards.filter((entry) => !entry.fetchedAt).length;
-  const lastUpdatedAt = dashboards
-    .map((entry) => entry.fetchedAt)
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => left.localeCompare(right))
-    .at(-1) ?? null;
-
-  let status: DashboardSnapshotStatus = "empty";
-  if (dashboards.length > 0 && missingSourceCount < dashboards.length) {
-    status =
-      refreshingSourceCount > 0
-        ? "refreshing"
-        : staleSourceCount > 0
-          ? "stale"
-          : "fresh";
-  }
-
-  return {
-    status,
-    lastUpdatedAt,
-    freshSourceCount,
-    staleSourceCount,
-    refreshingSourceCount,
-    missingSourceCount,
-  };
-}
-
-function isDashboardSnapshotStale(fetchedAt: string) {
-  const parsed = Date.parse(fetchedAt);
-  if (!Number.isFinite(parsed)) {
-    return true;
-  }
-
-  return Date.now() - parsed >= sourceDashboardSnapshotTtlMs;
 }
 
 function isSourceDashboardRefreshCoolingDown(cacheKey: string) {

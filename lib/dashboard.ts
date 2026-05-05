@@ -9,6 +9,7 @@ import {
   fetchScheduleSummary,
   fetchSubgroups,
 } from "./gitlab";
+import { resolveJiraBaseUrl } from "./server-jira";
 import { logServerError } from "./server-log";
 import { fetchSonarProjectSummary } from "./sonarqube";
 import type {
@@ -40,10 +41,23 @@ async function loadSourceDashboard(
       return {
         kind: "project",
         savedSource,
-        project: await buildProjectSummary(project, savedSource.sonarProjectKey, runtimeConfig),
+        project: await buildProjectSummary(
+          project,
+          resolveJiraBaseUrl(runtimeConfig),
+          savedSource.jiraProjectKeys,
+          savedSource.sonarProjectKey,
+          runtimeConfig,
+        ),
       };
     }
 
+    const jiraBaseUrl = resolveJiraBaseUrl(runtimeConfig);
+    const jiraProjectKeysByGitLabId = new Map(
+      savedSource.projectJiraOverrides.map((override) => [
+        override.gitlabProjectId,
+        override.jiraProjectKeys,
+      ]),
+    );
     const sonarProjectKeysByGitLabId = new Map(
       savedSource.projectSonarOverrides.map((override) => [
         override.gitlabProjectId,
@@ -52,6 +66,8 @@ async function loadSourceDashboard(
     );
     const group = await buildGroupNode(
       savedSource.gitlabId,
+      jiraBaseUrl,
+      jiraProjectKeysByGitLabId,
       sonarProjectKeysByGitLabId,
       runtimeConfig,
     );
@@ -84,6 +100,8 @@ async function loadSourceDashboard(
 
 async function buildGroupNode(
   groupId: number,
+  jiraBaseUrl: string | null,
+  jiraProjectKeysByGitLabId: Map<number, string[]>,
   sonarProjectKeysByGitLabId: Map<number, string | null>,
   runtimeConfig?: RuntimeConfig | null,
 ): Promise<GroupNode> {
@@ -98,6 +116,8 @@ async function buildGroupNode(
         projects.map((project) =>
           buildProjectSummary(
             project,
+            jiraBaseUrl,
+            jiraProjectKeysByGitLabId.get(project.id) ?? [],
             sonarProjectKeysByGitLabId.get(project.id) ?? null,
             runtimeConfig,
           ),
@@ -105,13 +125,20 @@ async function buildGroupNode(
       ),
       Promise.all(
         subgroups.map((subgroup) =>
-          buildGroupNode(subgroup.id, sonarProjectKeysByGitLabId, runtimeConfig),
+          buildGroupNode(
+            subgroup.id,
+            jiraBaseUrl,
+            jiraProjectKeysByGitLabId,
+            sonarProjectKeysByGitLabId,
+            runtimeConfig,
+          ),
         ),
       ),
   ]);
 
   return {
     ...group,
+    jiraBaseUrl,
     projects: projectSummaries,
     subgroups: subgroupNodes,
     summary: summarizeGroup(projectSummaries, subgroupNodes),
@@ -120,6 +147,8 @@ async function buildGroupNode(
 
 async function buildProjectSummary(
   project: GitLabProjectRef,
+  jiraBaseUrl: string | null,
+  jiraProjectKeys: string[],
   sonarProjectKey: string | null,
   runtimeConfig?: RuntimeConfig | null,
 ): Promise<ProjectSummary> {
@@ -139,6 +168,8 @@ async function buildProjectSummary(
 
   return {
     id: projectWithIssues.id,
+    jiraBaseUrl,
+    jiraProjectKeys,
     name: projectWithIssues.name,
     pathWithNamespace: projectWithIssues.pathWithNamespace,
     webUrl: projectWithIssues.webUrl,

@@ -9,6 +9,7 @@ services:
     environment:
       GITLAB_BASE_URL: ${GITLAB_BASE_URL:-}
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
       SONARQUBE_BASE_URL: ${SONARQUBE_BASE_URL:-}
       SONARQUBE_TOKEN: ${SONARQUBE_TOKEN:-}
     expose:

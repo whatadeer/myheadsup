@@ -11,6 +11,7 @@ import type {
   SourceKind,
   RuntimeConfig,
 } from "./types";
+import { preferRuntimeValue } from "./runtime-config";
 import { createConcurrencyLimiter } from "./concurrency-limit";
 import { describeRequestError } from "./request-errors";
 import { logServerDebug, logServerError } from "./server-log";
@@ -85,8 +86,8 @@ const searchCache = new Map<
 >();
 
 export function getGitLabConfigError(runtimeConfig?: RuntimeConfig | null) {
-  const baseUrl = runtimeConfig?.gitlabBaseUrl ?? process.env.GITLAB_BASE_URL?.trim() ?? "";
-  const token = runtimeConfig?.gitlabToken ?? process.env.GITLAB_TOKEN?.trim() ?? "";
+  const baseUrl = preferRuntimeValue(runtimeConfig?.gitlabBaseUrl, process.env.GITLAB_BASE_URL);
+  const token = preferRuntimeValue(runtimeConfig?.gitlabToken, process.env.GITLAB_TOKEN);
 
   if (!baseUrl) {
     return "Missing GITLAB_BASE_URL.";
@@ -328,14 +329,28 @@ export async function fetchScheduleSummary(
         String(left.next_run_at).localeCompare(String(right.next_run_at)),
       )
       .slice(0, 10)
-      .map((schedule) => ({
-        active: schedule.active,
-        description: schedule.description ?? null,
-        id: schedule.id,
-        nextRunAt: schedule.next_run_at ?? null,
-        ref: schedule.ref ?? null,
-      })),
+       .map((schedule) => ({
+         active: schedule.active,
+         description: schedule.description ?? null,
+         id: schedule.id,
+         nextRunAt: schedule.next_run_at ?? null,
+         ref: schedule.ref ?? null,
+       })),
   };
+}
+
+export async function playPipelineSchedule(
+  projectId: number,
+  scheduleId: number,
+  runtimeConfig?: RuntimeConfig | null,
+) {
+  await fetchGitLabResponse(
+    `/projects/${projectId}/pipeline_schedules/${scheduleId}/play`,
+    runtimeConfig,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function fetchPipelineActivity(
@@ -451,18 +466,22 @@ async function fetchGitLab<T>(path: string, runtimeConfig?: RuntimeConfig | null
   return (await response.json()) as T;
 }
 
-async function fetchGitLabResponse(path: string, runtimeConfig?: RuntimeConfig | null) {
+async function fetchGitLabResponse(
+  path: string,
+  runtimeConfig?: RuntimeConfig | null,
+  init?: RequestInit,
+) {
   const configError = getGitLabConfigError(runtimeConfig);
 
   if (configError) {
     throw new Error(configError);
   }
 
-  const baseUrl = (runtimeConfig?.gitlabBaseUrl ?? process.env.GITLAB_BASE_URL!.trim()).replace(
+  const baseUrl = preferRuntimeValue(runtimeConfig?.gitlabBaseUrl, process.env.GITLAB_BASE_URL).replace(
     /\/+$/,
     "",
   );
-  const token = runtimeConfig?.gitlabToken ?? process.env.GITLAB_TOKEN!.trim();
+  const token = preferRuntimeValue(runtimeConfig?.gitlabToken, process.env.GITLAB_TOKEN);
   let response: Response;
 
   try {
@@ -472,6 +491,7 @@ async function fetchGitLabResponse(path: string, runtimeConfig?: RuntimeConfig |
         headers: {
           "PRIVATE-TOKEN": token,
         },
+        ...init,
       }),
     );
   } catch (error) {

@@ -8,6 +8,7 @@ export type ActionState = {
 export type RuntimeConfig = {
   gitlabBaseUrl: string;
   gitlabToken: string;
+  jiraBaseUrl: string;
   sonarQubeBaseUrl: string;
   sonarQubeToken: string;
 };
@@ -31,6 +32,12 @@ export type SavedSourceProjectSonarOverride = {
   sonarProjectKey: string;
 };
 
+export type SavedSourceProjectJiraOverride = {
+  gitlabProjectId: number;
+  projectReference: string;
+  jiraProjectKeys: string[];
+};
+
 export type SavedSource = {
   id: string;
   kind: SourceKind;
@@ -39,7 +46,9 @@ export type SavedSource = {
   reference: string;
   query: string;
   exclusions: SavedSourceExclusion[];
+  projectJiraOverrides: SavedSourceProjectJiraOverride[];
   projectSonarOverrides: SavedSourceProjectSonarOverride[];
+  jiraProjectKeys: string[];
   sonarProjectKey: string | null;
   webUrl: string;
   createdAt: string;
@@ -132,6 +141,8 @@ export type ProjectSummary = {
   name: string;
   pathWithNamespace: string;
   webUrl: string;
+  jiraBaseUrl: string | null;
+  jiraProjectKeys: string[];
   sonarProjectKey: string | null;
   openIssues: number;
   issues: IssueSummary[];
@@ -159,6 +170,7 @@ export type GroupNode = {
   name: string;
   fullPath: string;
   webUrl: string;
+  jiraBaseUrl: string | null;
   projects: ProjectSummary[];
   subgroups: GroupNode[];
   summary: GroupSummary;

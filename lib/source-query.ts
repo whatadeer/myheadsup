@@ -1,8 +1,10 @@
 import type {
   SavedSourceExclusion,
+  SavedSourceProjectJiraOverride,
   SavedSourceProjectSonarOverride,
   SourceKind,
 } from "./types";
+import { normalizeJiraProjectKeys } from "./jira";
 
 type QuerySourceKind = SourceKind | "source";
 
@@ -16,11 +18,18 @@ type ParsedProjectSonarOverride = {
   sonarProjectKey: string;
 };
 
+type ParsedProjectJiraOverride = {
+  projectReference: string;
+  jiraProjectKeys: string[];
+};
+
 export type ParsedSourceQuery = {
   kind: QuerySourceKind;
   reference: string;
   exclusions: ParsedSourceReference[];
+  jiraProjectKeys: string[];
   sonarProjectKey: string | null;
+  projectJiraOverrides: ParsedProjectJiraOverride[];
   projectSonarOverrides: ParsedProjectSonarOverride[];
 };
 
@@ -28,7 +37,9 @@ export function buildSourceQuery(
   kind: QuerySourceKind,
   reference: string,
   exclusions: SavedSourceExclusion[] = [],
+  jiraProjectKeys: string[] = [],
   sonarProjectKey: string | null = null,
+  projectJiraOverrides: SavedSourceProjectJiraOverride[] = [],
   projectSonarOverrides: SavedSourceProjectSonarOverride[] = [],
 ) {
   const normalizedReference = reference.trim();
@@ -59,8 +70,16 @@ export function buildSourceQuery(
     );
   }
 
+  if (kind === "project" && jiraProjectKeys.length) {
+    lines.push(`With Jira ${jiraProjectKeys.join(", ")}`);
+  }
+
   if (kind === "project" && sonarProjectKey?.trim()) {
     lines.push(`With SonarQube ${sonarProjectKey.trim()}`);
+  }
+
+  for (const override of sortProjectJiraOverrides(projectJiraOverrides)) {
+    lines.push(`With Jira Project ${override.projectReference} = ${override.jiraProjectKeys.join(", ")}`);
   }
 
   for (const override of sortProjectSonarOverrides(projectSonarOverrides)) {
@@ -101,6 +120,18 @@ export function sortSourceReferences<T extends Pick<SavedSourceExclusion, "kind"
 export function sortProjectSonarOverrides<
   T extends Pick<SavedSourceProjectSonarOverride, "gitlabProjectId" | "projectReference" | "sonarProjectKey">,
 >(overrides: T[]) {
+  return sortProjectOverrides(overrides);
+}
+
+export function sortProjectJiraOverrides<
+  T extends Pick<SavedSourceProjectJiraOverride, "gitlabProjectId" | "projectReference" | "jiraProjectKeys">,
+>(overrides: T[]) {
+  return sortProjectOverrides(overrides);
+}
+
+function sortProjectOverrides<
+  T extends Pick<SavedSourceProjectSonarOverride, "gitlabProjectId" | "projectReference">,
+>(overrides: T[]) {
   return [...overrides].sort((left, right) => {
     const referenceOrder = left.projectReference.localeCompare(
       right.projectReference,
@@ -136,10 +167,29 @@ export function parseSourceQuery(value: string): ParsedSourceQuery {
   }
 
   const exclusionMap = new Map<string, ParsedSourceReference>();
+  const projectJiraOverrideMap = new Map<string, ParsedProjectJiraOverride>();
   const projectSonarOverrideMap = new Map<string, ParsedProjectSonarOverride>();
+  let jiraProjectKeys: string[] = [];
   let sonarProjectKey: string | null = null;
 
   for (const line of lines.slice(1)) {
+    const projectJiraOverrideMatch = /^With\s+Jira\s+Project\s+(.+?)\s*=\s*(.+)$/i.exec(line);
+
+    if (projectJiraOverrideMatch) {
+      const projectReference = projectJiraOverrideMatch[1]?.trim();
+      const overrideKeys = normalizeJiraProjectKeys(projectJiraOverrideMatch[2]);
+
+      if (!projectReference || !overrideKeys.length) {
+        throw new Error(`Unable to parse saved source query line: ${line}`);
+      }
+
+      projectJiraOverrideMap.set(projectReference.toLowerCase(), {
+        projectReference,
+        jiraProjectKeys: overrideKeys,
+      });
+      continue;
+    }
+
     const projectOverrideMatch = /^With\s+SonarQube\s+Project\s+(.+?)\s*=\s*(.+)$/i.exec(line);
 
     if (projectOverrideMatch) {
@@ -154,6 +204,19 @@ export function parseSourceQuery(value: string): ParsedSourceQuery {
         projectReference,
         sonarProjectKey: overrideKey,
       });
+      continue;
+    }
+
+    const jiraMatch = /^With\s+Jira\s+(.+)$/i.exec(line);
+
+    if (jiraMatch) {
+      const nextKeys = normalizeJiraProjectKeys(jiraMatch[1]);
+
+      if (!nextKeys.length) {
+        throw new Error(`Unable to parse saved source query line: ${line}`);
+      }
+
+      jiraProjectKeys = nextKeys;
       continue;
     }
 
@@ -205,7 +268,17 @@ export function parseSourceQuery(value: string): ParsedSourceQuery {
       kind,
       reference,
     })),
+    jiraProjectKeys,
     sonarProjectKey,
+    projectJiraOverrides: sortProjectJiraOverrides(
+      [...projectJiraOverrideMap.values()].map((override, index) => ({
+        ...override,
+        gitlabProjectId: index,
+      })),
+    ).map(({ projectReference, jiraProjectKeys: overrideKeys }) => ({
+      projectReference,
+      jiraProjectKeys: overrideKeys,
+    })),
     projectSonarOverrides: sortProjectSonarOverrides(
       [...projectSonarOverrideMap.values()].map((override, index) => ({
         ...override,

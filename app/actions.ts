@@ -8,11 +8,13 @@ import {
   addSource,
   addSourceExclusion,
   removeSource,
+  saveSourceProjectJiraOverride,
   saveSourceProjectSonarOverride,
 } from "@/lib/store";
 import type {
   ActionState,
   SavedSourceExclusion,
+  SavedSourceProjectJiraOverride,
   SavedSourceProjectSonarOverride,
   RuntimeConfig,
   SourceKind,
@@ -34,7 +36,7 @@ export async function addSourceAction(
   try {
     const runtimeConfig = parseRuntimeConfigString(formData.get("runtimeConfig"));
     const parsedQuery = parseSourceQuery(sourceQueryDefinition);
-    const [resolved, exclusions, projectSonarOverrides] = await Promise.all([
+    const [resolved, exclusions, projectJiraOverrides, projectSonarOverrides] = await Promise.all([
       resolveSourceSelection(
         parsedQuery.reference,
         parsedQuery.reference,
@@ -42,6 +44,7 @@ export async function addSourceAction(
         runtimeConfig,
       ),
       resolveExcludedSourceReferences(parsedQuery.exclusions, runtimeConfig),
+      resolveProjectJiraOverrides(parsedQuery.projectJiraOverrides, runtimeConfig),
       resolveProjectSonarOverrides(parsedQuery.projectSonarOverrides, runtimeConfig),
     ]);
 
@@ -59,10 +62,24 @@ export async function addSourceAction(
       };
     }
 
+    if (resolved.kind === "group" && parsedQuery.jiraProjectKeys.length) {
+      return {
+        status: "error",
+        message: 'Only saved projects can use "With Jira ...".',
+      };
+    }
+
     if (resolved.kind === "project" && projectSonarOverrides.length) {
       return {
         status: "error",
         message: 'Only saved groups can use "With SonarQube Project ... = ...".',
+      };
+    }
+
+    if (resolved.kind === "project" && projectJiraOverrides.length) {
+      return {
+        status: "error",
+        message: 'Only saved groups can use "With Jira Project ... = ...".',
       };
     }
 
@@ -80,8 +97,10 @@ export async function addSourceAction(
     const result = await addSource({
       exclusions,
       gitlabId: resolved.gitlabId,
+      jiraProjectKeys: resolved.kind === "project" ? parsedQuery.jiraProjectKeys : [],
       kind: resolved.kind,
       name: resolved.name,
+      projectJiraOverrides,
       projectSonarOverrides,
       reference: resolved.reference,
       sonarProjectKey: resolved.kind === "project" ? parsedQuery.sonarProjectKey : null,
@@ -116,6 +135,56 @@ export async function removeSourceAction(formData: FormData) {
 
   await removeSource(sourceId);
   revalidatePath("/");
+}
+
+export async function updateProjectJiraKeysAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const sourceId = formData.get("sourceId");
+  const projectId = formData.get("projectId");
+  const projectReference = formData.get("projectReference");
+  const jiraProjectKeys = formData.get("jiraProjectKeys");
+
+  if (
+    typeof sourceId !== "string" ||
+    !sourceId ||
+    typeof projectReference !== "string" ||
+    !projectReference.trim() ||
+    typeof projectId !== "string" ||
+    !/^\d+$/.test(projectId)
+  ) {
+    return {
+      status: "error",
+      message: "Unable to determine which project Jira keys to update.",
+    };
+  }
+
+  try {
+    await saveSourceProjectJiraOverride(
+      sourceId,
+      Number(projectId),
+      projectReference.trim(),
+      typeof jiraProjectKeys === "string" ? jiraProjectKeys : null,
+    );
+    revalidatePath("/");
+
+    return {
+      status: "success",
+      message:
+        typeof jiraProjectKeys === "string" && jiraProjectKeys.trim()
+          ? "Saved the Jira project keys."
+          : "Cleared the Jira project keys.",
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Unable to update the Jira project keys.",
+    };
+  }
 }
 
 export async function updateProjectSonarKeyAction(
@@ -249,6 +318,36 @@ async function resolveExcludedSourceReferences(
   }
 
   return [...uniqueSources.values()];
+}
+
+async function resolveProjectJiraOverrides(
+  overrides: { projectReference: string; jiraProjectKeys: string[] }[],
+  runtimeConfig?: RuntimeConfig | null,
+): Promise<SavedSourceProjectJiraOverride[]> {
+  const resolvedOverrides = await Promise.all(
+    overrides.map(async (override) => {
+      const project = await resolveSourceSelection(
+        override.projectReference,
+        override.projectReference,
+        "project",
+        runtimeConfig,
+      );
+
+      return {
+        gitlabProjectId: project.gitlabId,
+        jiraProjectKeys: override.jiraProjectKeys,
+        projectReference: project.reference,
+      };
+    }),
+  );
+
+  const uniqueOverrides = new Map<string, SavedSourceProjectJiraOverride>();
+
+  for (const override of resolvedOverrides) {
+    uniqueOverrides.set(override.projectReference.toLowerCase(), override);
+  }
+
+  return [...uniqueOverrides.values()];
 }
 
 async function resolveProjectSonarOverrides(

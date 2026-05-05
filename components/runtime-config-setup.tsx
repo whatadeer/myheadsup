@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   emptyRuntimeConfig,
-  getRuntimeConfigValidationError,
+  getRuntimeConfigValidationErrorWithOptions,
   sanitizeRuntimeConfig,
 } from "@/lib/runtime-config";
 import type { RuntimeConfig } from "@/lib/types";
@@ -12,13 +12,15 @@ type RuntimeConfigSetupProps = {
   currentValue: RuntimeConfig | null;
   onClear: () => void;
   onSave: (nextValue: RuntimeConfig) => void;
-  serverConfigError: string;
+  requireGitLab: boolean;
+  serverConfigError: string | null;
 };
 
 export function RuntimeConfigSetup({
   currentValue,
   onClear,
   onSave,
+  requireGitLab,
   serverConfigError,
 }: RuntimeConfigSetupProps) {
   const [formState, setFormState] = useState<RuntimeConfig>(currentValue ?? emptyRuntimeConfig());
@@ -35,7 +37,9 @@ export function RuntimeConfigSetup({
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextValue = sanitizeRuntimeConfig(formState);
-    const validationError = getRuntimeConfigValidationError(nextValue);
+    const validationError = getRuntimeConfigValidationErrorWithOptions(nextValue, {
+      requireGitLab,
+    });
 
     if (validationError) {
       setStatus("error");
@@ -52,12 +56,21 @@ export function RuntimeConfigSetup({
   return (
     <div className="runtime-config-shell">
       <div className="notice setup-prompt">
-        <p>
-          Server environment variables are missing, so live GitLab data is blocked until
-          you configure this browser. Stored browser settings stay local to this browser
-          and are not written into the container.
-        </p>
-        <p className="helper-text">Current setup block: {serverConfigError}</p>
+        {requireGitLab ? (
+          <>
+            <p>
+              Server environment variables are missing, so live GitLab data is blocked until
+              you configure this browser. Stored browser settings stay local to this browser
+              and are not written into the container.
+            </p>
+            <p className="helper-text">Current setup block: {serverConfigError}</p>
+          </>
+        ) : (
+          <p>
+            Optional browser settings stay local to this browser and can add Jira links or
+            override GitLab and SonarQube settings without changing the server environment.
+          </p>
+        )}
       </div>
 
       <form className="runtime-config-form" onSubmit={handleSubmit}>
@@ -82,6 +95,17 @@ export function RuntimeConfigSetup({
               placeholder="Personal access token with read_api"
               type="password"
               value={formState.gitlabToken}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="runtime-jira-base-url">Jira base URL</label>
+            <input
+              className="input"
+              id="runtime-jira-base-url"
+              onChange={(event) => updateField("jiraBaseUrl", event.target.value)}
+              placeholder="Optional"
+              type="url"
+              value={formState.jiraBaseUrl}
             />
           </div>
           <div className="field">
@@ -131,7 +155,12 @@ export function RuntimeConfigSetup({
           Use server environment variables when possible. Browser-stored tokens are less
           secure because they remain accessible to this browser profile.
         </p>
-        <p className={`form-message ${status}`}>{message || "GitLab settings are required. SonarQube is optional."}</p>
+        <p className={`form-message ${status}`}>
+          {message ||
+            (requireGitLab
+              ? "GitLab settings are required. Jira and SonarQube are optional."
+              : "Jira is optional. Enter GitLab or SonarQube values only when you want browser-only overrides.")}
+        </p>
       </form>
     </div>
   );

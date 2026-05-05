@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { addSourceAction, removeSourceAction } from "@/app/actions";
 import { DashboardRefreshStatus } from "@/components/dashboard-refresh-status";
 import { GroupTreeFilter } from "@/components/group-tree-filter";
+import { JiraProjectLinks } from "@/components/jira-project-links";
 import { LoadingStatus } from "@/components/loading-status";
 import { ProjectDetailTabs } from "@/components/project-detail-tabs";
 import { RuntimeConfigSetup } from "@/components/runtime-config-setup";
@@ -25,12 +26,20 @@ type HomeContentProps = {
   initialDashboards: SourceDashboard[];
   savedSources: SavedSource[];
   serverConfigError: string | null;
+  showDebugUrls: boolean;
+  serverUrls: {
+    gitlabBaseUrl: string | null;
+    jiraBaseUrl: string | null;
+    sonarQubeBaseUrl: string | null;
+  };
 };
 
 export function HomeContent({
   initialDashboards,
   savedSources,
   serverConfigError,
+  showDebugUrls,
+  serverUrls,
 }: HomeContentProps) {
   const isHydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   const runtimeConfig = useSyncExternalStore(
@@ -65,6 +74,11 @@ export function HomeContent({
   const visibleDashboards = showLiveDashboards ? dashboards : [];
   const hasVisibleDashboardData = visibleDashboards.length > 0;
   const manualCooldownRemainingMs = Math.max(manualRefreshAvailableAt - clockNow, 0);
+  const effectiveUrls = {
+    gitlabBaseUrl: resolveDebugUrl(runtimeConfig?.gitlabBaseUrl, serverUrls.gitlabBaseUrl),
+    jiraBaseUrl: resolveDebugUrl(runtimeConfig?.jiraBaseUrl, serverUrls.jiraBaseUrl),
+    sonarQubeBaseUrl: resolveDebugUrl(runtimeConfig?.sonarQubeBaseUrl, serverUrls.sonarQubeBaseUrl),
+  };
 
   const loadDashboards = useCallback(
     async (trigger: "auto" | "initial" | "manual") => {
@@ -358,11 +372,38 @@ export function HomeContent({
     );
   }
 
+  const handleScheduleTriggered = useCallback(() => {
+    if (!canRefreshDashboards) {
+      return;
+    }
+
+    void loadDashboards(hasVisibleDashboardData ? "manual" : "initial");
+  }, [canRefreshDashboards, hasVisibleDashboardData, loadDashboards]);
+
   return (
     <main className="shell">
       <section className="hero">
         <div className="hero-copy">
-          <span className="eyebrow">Self-hosted GitLab</span>
+          <div className="hero-integrations" aria-label="Integrated sources">
+            <HeroIntegrationChip
+              href={effectiveUrls.gitlabBaseUrl}
+              kind="gitlab"
+              label="GitLab"
+              shortLabel="GL"
+            />
+            <HeroIntegrationChip
+              href={effectiveUrls.jiraBaseUrl}
+              kind="jira"
+              label="Jira"
+              shortLabel="JR"
+            />
+            <HeroIntegrationChip
+              href={effectiveUrls.sonarQubeBaseUrl}
+              kind="sonar"
+              label="SonarQube"
+              shortLabel="SQ"
+            />
+          </div>
           <h1>MyHeadsUp</h1>
           <p>
             Keep a single top-level view of the GitLab groups and projects you care
@@ -402,6 +443,7 @@ export function HomeContent({
               currentValue={runtimeConfig}
               onClear={handleClearRuntimeConfig}
               onSave={handleSaveRuntimeConfig}
+              requireGitLab
               serverConfigError={serverConfigError}
             />
           ) : null}
@@ -439,11 +481,16 @@ export function HomeContent({
           />
         </section>
       ) : (
-        <section className="dashboard-list">
-          {visibleDashboards.map((dashboard) => (
-            <SourceCard dashboard={dashboard} key={dashboard.savedSource.id} />
-          ))}
-        </section>
+          <section className="dashboard-list">
+            {visibleDashboards.map((dashboard) => (
+              <SourceCard
+                dashboard={dashboard}
+                key={dashboard.savedSource.id}
+                onScheduleTriggered={handleScheduleTriggered}
+                runtimeConfig={runtimeConfig}
+              />
+            ))}
+          </section>
       )}
 
       {isHydrated && canRefreshDashboards ? (
@@ -456,7 +503,100 @@ export function HomeContent({
           statusText={refreshStatusText}
         />
       ) : null}
+
+      {showDebugUrls ? (
+        <details className="debug-dock">
+          <summary className="debug-dock-summary">Debug URLs</summary>
+          <div className="debug-dock-body">
+            <p className="helper-text">URLs only. Tokens are never shown here.</p>
+            <DebugUrlRow
+              label="Server GitLab"
+              value={serverUrls.gitlabBaseUrl}
+            />
+            <DebugUrlRow
+              label="Browser GitLab"
+              value={runtimeConfig?.gitlabBaseUrl ?? null}
+            />
+            <DebugUrlRow
+              label="Effective GitLab"
+              value={effectiveUrls.gitlabBaseUrl}
+            />
+            <DebugUrlRow
+              label="Server Jira"
+              value={serverUrls.jiraBaseUrl}
+            />
+            <DebugUrlRow
+              label="Browser Jira"
+              value={runtimeConfig?.jiraBaseUrl ?? null}
+            />
+            <DebugUrlRow
+              label="Effective Jira"
+              value={effectiveUrls.jiraBaseUrl}
+            />
+            <DebugUrlRow
+              label="Server Sonar"
+              value={serverUrls.sonarQubeBaseUrl}
+            />
+            <DebugUrlRow
+              label="Browser Sonar"
+              value={runtimeConfig?.sonarQubeBaseUrl ?? null}
+            />
+            <DebugUrlRow
+              label="Effective Sonar"
+              value={effectiveUrls.sonarQubeBaseUrl}
+            />
+          </div>
+        </details>
+      ) : null}
     </main>
+  );
+}
+
+function DebugUrlRow({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="debug-dock-row">
+      <span className="debug-dock-label">{label}</span>
+      <code className="debug-dock-value">{value?.trim() || "unset"}</code>
+    </div>
+  );
+}
+
+function resolveDebugUrl(runtimeValue: string | null | undefined, serverValue: string | null) {
+  const normalizedRuntimeValue = runtimeValue?.trim() ?? "";
+  if (normalizedRuntimeValue) {
+    return normalizedRuntimeValue;
+  }
+
+  return serverValue;
+}
+
+function HeroIntegrationChip({
+  href,
+  kind,
+  label,
+  shortLabel,
+}: {
+  href: string | null;
+  kind: "gitlab" | "jira" | "sonar";
+  label: string;
+  shortLabel: string;
+}) {
+  const className = `hero-integration hero-integration-${kind}`;
+  const content = (
+    <>
+      <span className="hero-integration-icon" aria-hidden="true">{shortLabel}</span>
+      {label}
+    </>
+  );
+
+  if (!href) {
+    return <span className={className}>{content}</span>;
+  }
+
+  return (
+    <a className={className} href={href} rel="noreferrer" target="_blank">
+      {content}
+    </a>
   );
 }
 
@@ -647,7 +787,15 @@ function SavedSourcesList({
   );
 }
 
-function SourceCard({ dashboard }: { dashboard: SourceDashboard }) {
+function SourceCard({
+  dashboard,
+  onScheduleTriggered,
+  runtimeConfig,
+}: {
+  dashboard: SourceDashboard;
+  onScheduleTriggered: () => void;
+  runtimeConfig?: RuntimeConfig | null;
+}) {
   if ("error" in dashboard) {
     return (
       <article className="panel source-card">
@@ -672,16 +820,32 @@ function SourceCard({ dashboard }: { dashboard: SourceDashboard }) {
   }
 
   if (dashboard.kind === "project") {
-    return <ProjectSourceCard dashboard={dashboard} />;
+    return (
+      <ProjectSourceCard
+        dashboard={dashboard}
+        onScheduleTriggered={onScheduleTriggered}
+        runtimeConfig={runtimeConfig}
+      />
+    );
   }
 
-  return <GroupSourceCard dashboard={dashboard} />;
+  return (
+    <GroupSourceCard
+      dashboard={dashboard}
+      onScheduleTriggered={onScheduleTriggered}
+      runtimeConfig={runtimeConfig}
+    />
+  );
 }
 
 function ProjectSourceCard({
   dashboard,
+  onScheduleTriggered,
+  runtimeConfig,
 }: {
   dashboard: Extract<SourceDashboard, { kind: "project" }>;
+  onScheduleTriggered: () => void;
+  runtimeConfig?: RuntimeConfig | null;
 }) {
   const { project, savedSource } = dashboard;
 
@@ -699,6 +863,11 @@ function ProjectSourceCard({
               {project.pathWithNamespace}
             </a>
           </p>
+          <JiraProjectLinks
+            baseUrl={project.jiraBaseUrl}
+            jiraProjectKeys={project.jiraProjectKeys}
+            label="Jira projects"
+          />
         </div>
         <div className="source-header-actions">
           <span className={`status-pill ${statusTone(project.latestPipeline?.status)}`}>
@@ -708,15 +877,24 @@ function ProjectSourceCard({
         </div>
       </div>
 
-      <ProjectDetailTabs project={project} sourceId={savedSource.id} />
+      <ProjectDetailTabs
+        onScheduleTriggered={onScheduleTriggered}
+        project={project}
+        runtimeConfig={runtimeConfig}
+        sourceId={savedSource.id}
+      />
     </article>
   );
 }
 
 function GroupSourceCard({
   dashboard,
+  onScheduleTriggered,
+  runtimeConfig,
 }: {
   dashboard: Extract<SourceDashboard, { kind: "group" }>;
+  onScheduleTriggered: () => void;
+  runtimeConfig?: RuntimeConfig | null;
 }) {
   const { group, savedSource } = dashboard;
 
@@ -737,7 +915,12 @@ function GroupSourceCard({
         <RemoveSourceButton sourceId={savedSource.id} />
       </div>
 
-      <GroupTreeFilter group={group} sourceId={savedSource.id} />
+      <GroupTreeFilter
+        group={group}
+        onScheduleTriggered={onScheduleTriggered}
+        runtimeConfig={runtimeConfig}
+        sourceId={savedSource.id}
+      />
     </article>
   );
 }

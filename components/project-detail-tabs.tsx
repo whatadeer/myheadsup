@@ -1,21 +1,31 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { JiraProjectLinks } from "@/components/jira-project-links";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
+import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
+import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
 import { formatMergeRequestMeta } from "@/lib/merge-request-meta";
 import { labelPipeline, statusTone } from "@/lib/pipeline";
-import type { ProjectSummary } from "@/lib/types";
+import type { ProjectSummary, RuntimeConfig } from "@/lib/types";
 
 type ProjectDetailTabsProps = {
+  onScheduleTriggered?: () => void;
   project: ProjectSummary;
+  runtimeConfig?: RuntimeConfig | null;
   sourceId: string;
 };
 
 type ProjectTab = "issues" | "merge-requests" | "schedules";
 
-export function ProjectDetailTabs({ project, sourceId }: ProjectDetailTabsProps) {
+export function ProjectDetailTabs({
+  onScheduleTriggered,
+  project,
+  runtimeConfig,
+  sourceId,
+}: ProjectDetailTabsProps) {
   const [selectedTab, setSelectedTab] = useState<ProjectTab>(
     project.openMergeRequests ? "merge-requests" : project.schedules.upcoming.length ? "schedules" : "issues",
   );
@@ -64,6 +74,12 @@ export function ProjectDetailTabs({ project, sourceId }: ProjectDetailTabsProps)
                       {formatScheduleDate(schedule.nextRunAt)}
                       {schedule.ref ? ` - ${schedule.ref}` : ""}
                     </span>
+                    <ScheduleRunButton
+                      onTriggered={onScheduleTriggered}
+                      projectId={project.id}
+                      runtimeConfig={runtimeConfig}
+                      scheduleId={schedule.id}
+                    />
                   </div>
                 ))}
               </div>
@@ -107,7 +123,7 @@ export function ProjectDetailTabs({ project, sourceId }: ProjectDetailTabsProps)
           </div>
         );
     }
-  }, [project, selectedTab]);
+  }, [onScheduleTriggered, project, runtimeConfig, selectedTab]);
 
   return (
     <>
@@ -167,6 +183,13 @@ export function ProjectDetailTabs({ project, sourceId }: ProjectDetailTabsProps)
 
       <div className="project-card-detail-grid">
         <div className="summary-stack">
+          <ProjectJiraKeyForm
+            currentKeys={project.jiraProjectKeys}
+            jiraBaseUrl={project.jiraBaseUrl}
+            projectId={project.id}
+            projectReference={project.pathWithNamespace}
+            sourceId={sourceId}
+          />
           <ProjectSonarKeyForm
             currentKey={project.sonarProjectKey}
             projectId={project.id}
@@ -184,6 +207,11 @@ export function ProjectDetailTabs({ project, sourceId }: ProjectDetailTabsProps)
         </div>
 
         <div className="summary-stack project-card-histogram">
+          <JiraProjectLinks
+            baseUrl={project.jiraBaseUrl}
+            jiraProjectKeys={project.jiraProjectKeys}
+            label="Jira projects"
+          />
           <PipelineHistogram
             buckets={project.pipelineActivity}
             label="Pipeline activity (14 days)"

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { loadSourceDashboards } from "@/lib/dashboard";
 import { getGitLabConfigError } from "@/lib/gitlab";
 import { parseRuntimeConfigValue } from "@/lib/runtime-config";
+import { resolveJiraBaseUrl } from "@/lib/server-jira";
 import { logServerDebug, logServerError } from "@/lib/server-log";
 import { readSources } from "@/lib/store";
 import type { RuntimeConfig, SavedSource, SourceDashboard } from "@/lib/types";
@@ -69,11 +70,14 @@ function buildDashboardCacheKey(
   runtimeConfig?: RuntimeConfig | null,
 ) {
   const payload = JSON.stringify({
+    jiraBaseUrl: resolveJiraBaseUrl(runtimeConfig),
     runtimeConfig: runtimeConfig ?? null,
     savedSources: savedSources.map((source) => ({
       gitlabId: source.gitlabId,
       id: source.id,
+      jiraProjectKeys: source.jiraProjectKeys,
       kind: source.kind,
+      projectJiraOverrides: source.projectJiraOverrides,
       projectSonarOverrides: source.projectSonarOverrides,
       query: source.query,
       sonarProjectKey: source.sonarProjectKey,

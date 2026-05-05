@@ -34,6 +34,7 @@ export function SourceForm({ action, runtimeConfig }: SourceFormProps) {
         selectedKind,
         reference,
         excludedSources,
+        [],
         selectedKind === "group" ? null : sonarProjectKey,
       ),
     [excludedSources, reference, selectedKind, sonarProjectKey],

@@ -4,6 +4,7 @@ export function emptyRuntimeConfig(): RuntimeConfig {
   return {
     gitlabBaseUrl: "",
     gitlabToken: "",
+    jiraBaseUrl: "",
     sonarQubeBaseUrl: "",
     sonarQubeToken: "",
   };
@@ -15,6 +16,7 @@ export function sanitizeRuntimeConfig(
   return {
     gitlabBaseUrl: normalizeBaseUrl(value?.gitlabBaseUrl),
     gitlabToken: normalizeString(value?.gitlabToken),
+    jiraBaseUrl: normalizeBaseUrl(value?.jiraBaseUrl),
     sonarQubeBaseUrl: normalizeBaseUrl(value?.sonarQubeBaseUrl),
     sonarQubeToken: normalizeString(value?.sonarQubeToken),
   };
@@ -50,22 +52,37 @@ export function hasRuntimeConfigValues(config: RuntimeConfig | null | undefined)
   return Boolean(
     config.gitlabBaseUrl ||
       config.gitlabToken ||
+      config.jiraBaseUrl ||
       config.sonarQubeBaseUrl ||
       config.sonarQubeToken,
   );
 }
 
 export function getRuntimeConfigValidationError(config: RuntimeConfig | null | undefined) {
+  return getRuntimeConfigValidationErrorWithOptions(config, { requireGitLab: true });
+}
+
+export function getRuntimeConfigValidationErrorWithOptions(
+  config: RuntimeConfig | null | undefined,
+  options: { requireGitLab: boolean },
+) {
   if (!config) {
-    return "Enter the GitLab base URL and token.";
+    return options.requireGitLab ? "Enter the GitLab base URL and token." : null;
   }
 
-  if (!config.gitlabBaseUrl) {
-    return "Enter the GitLab base URL.";
-  }
+  const hasGitLabBaseUrl = Boolean(config.gitlabBaseUrl);
+  const hasGitLabToken = Boolean(config.gitlabToken);
 
-  if (!config.gitlabToken) {
-    return "Enter the GitLab token.";
+  if (options.requireGitLab) {
+    if (!hasGitLabBaseUrl) {
+      return "Enter the GitLab base URL.";
+    }
+
+    if (!hasGitLabToken) {
+      return "Enter the GitLab token.";
+    }
+  } else if (hasGitLabBaseUrl !== hasGitLabToken) {
+    return "Enter both the GitLab base URL and token to override GitLab access, or leave both blank.";
   }
 
   const hasSonarBaseUrl = Boolean(config.sonarQubeBaseUrl);
@@ -80,6 +97,15 @@ export function getRuntimeConfigValidationError(config: RuntimeConfig | null | u
 
 function normalizeBaseUrl(value: unknown) {
   return normalizeString(value).replace(/\/+$/, "");
+}
+
+export function preferRuntimeValue(runtimeValue: unknown, fallbackValue: string | undefined | null) {
+  const normalizedRuntimeValue = normalizeString(runtimeValue);
+  if (normalizedRuntimeValue) {
+    return normalizedRuntimeValue;
+  }
+
+  return normalizeString(fallbackValue);
 }
 
 function normalizeString(value: unknown) {

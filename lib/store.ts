@@ -3,13 +3,16 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildSourceQuery,
+  sortProjectJiraOverrides,
   sameSourceReference,
   sortProjectSonarOverrides,
   sortSourceReferences,
 } from "./source-query";
+import { normalizeJiraProjectKeys } from "./jira";
 import type {
   SavedSource,
   SavedSourceExclusion,
+  SavedSourceProjectJiraOverride,
   SavedSourceProjectSonarOverride,
 } from "./types";
 
@@ -43,7 +46,9 @@ export async function addSource(
       existingSource.reference = normalizedSource.reference;
       existingSource.query = normalizedSource.query;
       existingSource.exclusions = normalizedSource.exclusions;
+      existingSource.projectJiraOverrides = normalizedSource.projectJiraOverrides;
       existingSource.projectSonarOverrides = normalizedSource.projectSonarOverrides;
+      existingSource.jiraProjectKeys = normalizedSource.jiraProjectKeys;
       existingSource.sonarProjectKey = normalizedSource.sonarProjectKey;
       existingSource.webUrl = normalizedSource.webUrl;
       await writeStore(store);
@@ -72,6 +77,54 @@ export async function removeSource(sourceId: string) {
   }
 
   await writeStore({ sources });
+}
+
+export async function saveSourceProjectJiraOverride(
+  sourceId: string,
+  gitlabProjectId: number,
+  projectReference: string,
+  jiraProjectKeys: string[] | string | null,
+) {
+  const store = await readStore();
+  const source = store.sources.find((entry) => entry.id === sourceId);
+
+  if (!source) {
+    throw new Error("That saved source no longer exists.");
+  }
+
+  const normalizedKeys = normalizeJiraProjectKeys(jiraProjectKeys);
+
+  if (source.kind === "project") {
+    if (source.gitlabId !== gitlabProjectId) {
+      throw new Error("That project does not belong to the saved source you are editing.");
+    }
+
+    source.jiraProjectKeys = normalizedKeys;
+  } else {
+    source.projectJiraOverrides = source.projectJiraOverrides.filter(
+      (override) => override.gitlabProjectId !== gitlabProjectId,
+    );
+
+    if (normalizedKeys.length) {
+      source.projectJiraOverrides.push({
+        gitlabProjectId,
+        jiraProjectKeys: normalizedKeys,
+        projectReference: projectReference.trim(),
+      });
+      source.projectJiraOverrides = sortProjectJiraOverrides(source.projectJiraOverrides);
+    }
+  }
+
+  source.query = buildSourceQuery(
+    source.kind,
+    source.reference,
+    source.exclusions,
+    source.jiraProjectKeys,
+    source.sonarProjectKey,
+    source.projectJiraOverrides,
+    source.projectSonarOverrides,
+  );
+  await writeStore(store);
 }
 
 export async function saveSourceProjectSonarOverride(
@@ -117,7 +170,9 @@ export async function saveSourceProjectSonarOverride(
     source.kind,
     source.reference,
     source.exclusions,
+    source.jiraProjectKeys,
     source.sonarProjectKey,
+    source.projectJiraOverrides,
     source.projectSonarOverrides,
   );
   await writeStore(store);
@@ -149,6 +204,9 @@ export async function addSourceExclusion(
   source.exclusions = sortSourceReferences([...source.exclusions, exclusion]);
 
   if (exclusion.kind === "project") {
+    source.projectJiraOverrides = source.projectJiraOverrides.filter(
+      (override) => override.gitlabProjectId !== exclusion.gitlabId,
+    );
     source.projectSonarOverrides = source.projectSonarOverrides.filter(
       (override) => override.gitlabProjectId !== exclusion.gitlabId,
     );
@@ -158,7 +216,9 @@ export async function addSourceExclusion(
     source.kind,
     source.reference,
     source.exclusions,
+    source.jiraProjectKeys,
     source.sonarProjectKey,
+    source.projectJiraOverrides,
     source.projectSonarOverrides,
   );
 
@@ -173,26 +233,35 @@ async function readStore(): Promise<StoreShape> {
 
   return {
     sources: Array.isArray(parsed.sources)
-      ? parsed.sources.map((source) => ({
-          ...source,
-          exclusions: normalizeExclusions(source?.exclusions),
-          projectSonarOverrides: normalizeProjectSonarOverrides(source?.projectSonarOverrides),
-          query:
-            typeof source?.query === "string" && source.query.trim()
+        ? parsed.sources.map((source) => ({
+            ...source,
+            exclusions: normalizeExclusions(source?.exclusions),
+            projectJiraOverrides: normalizeProjectJiraOverrides(source?.projectJiraOverrides),
+            projectSonarOverrides: normalizeProjectSonarOverrides(source?.projectSonarOverrides),
+            query:
+              typeof source?.query === "string" && source.query.trim()
               ? source.query.trim()
               : buildSourceQuery(
                   source?.kind === "group" || source?.kind === "project"
                     ? source.kind
-                    : "source",
-                  typeof source?.reference === "string" ? source.reference : "",
-                  normalizeExclusions(source?.exclusions),
-                  source?.kind === "project" &&
-                    typeof source?.sonarProjectKey === "string" &&
-                    source.sonarProjectKey.trim()
-                    ? source.sonarProjectKey.trim()
-                    : null,
-                  normalizeProjectSonarOverrides(source?.projectSonarOverrides),
-                ),
+                   : "source",
+                   typeof source?.reference === "string" ? source.reference : "",
+                   normalizeExclusions(source?.exclusions),
+                   source?.kind === "project"
+                     ? normalizeJiraProjectKeys(source?.jiraProjectKeys)
+                     : [],
+                   source?.kind === "project" &&
+                     typeof source?.sonarProjectKey === "string" &&
+                     source.sonarProjectKey.trim()
+                     ? source.sonarProjectKey.trim()
+                     : null,
+                   normalizeProjectJiraOverrides(source?.projectJiraOverrides),
+                   normalizeProjectSonarOverrides(source?.projectSonarOverrides),
+                 ),
+          jiraProjectKeys:
+            source?.kind === "project"
+              ? normalizeJiraProjectKeys(source?.jiraProjectKeys)
+              : [],
           sonarProjectKey:
             source?.kind === "project" &&
             typeof source?.sonarProjectKey === "string" &&
@@ -211,7 +280,9 @@ async function writeStore(store: StoreShape) {
 
 function normalizeSource(source: Omit<SavedSource, "id" | "createdAt" | "query">) {
   const exclusions = normalizeExclusions(source.exclusions);
+  const projectJiraOverrides = normalizeProjectJiraOverrides(source.projectJiraOverrides);
   const projectSonarOverrides = normalizeProjectSonarOverrides(source.projectSonarOverrides);
+  const jiraProjectKeys = source.kind === "project" ? normalizeJiraProjectKeys(source.jiraProjectKeys) : [];
   const sonarProjectKey =
     source.kind === "project" &&
     typeof source.sonarProjectKey === "string" &&
@@ -222,16 +293,51 @@ function normalizeSource(source: Omit<SavedSource, "id" | "createdAt" | "query">
   return {
     ...source,
     exclusions,
+    projectJiraOverrides,
     projectSonarOverrides,
     query: buildSourceQuery(
       source.kind,
       source.reference,
       exclusions,
+      jiraProjectKeys,
       sonarProjectKey,
+      projectJiraOverrides,
       projectSonarOverrides,
     ),
+    jiraProjectKeys,
     sonarProjectKey,
   };
+}
+
+function normalizeProjectJiraOverrides(value: unknown): SavedSourceProjectJiraOverride[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return sortProjectJiraOverrides(
+    value.filter(isSavedSourceProjectJiraOverride).map((override) => ({
+      gitlabProjectId: override.gitlabProjectId,
+      jiraProjectKeys: normalizeJiraProjectKeys(override.jiraProjectKeys),
+      projectReference: override.projectReference.trim(),
+    })),
+  );
+}
+
+function isSavedSourceProjectJiraOverride(
+  value: unknown,
+): value is SavedSourceProjectJiraOverride {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.gitlabProjectId === "number" &&
+    typeof candidate.projectReference === "string" &&
+    candidate.projectReference.trim().length > 0 &&
+    Array.isArray(candidate.jiraProjectKeys) &&
+    candidate.jiraProjectKeys.every((key) => typeof key === "string" && key.trim().length > 0)
+  );
 }
 
 function normalizeProjectSonarOverrides(value: unknown): SavedSourceProjectSonarOverride[] {
@@ -304,10 +410,30 @@ function areSourcesEquivalent(
     left.name === right.name &&
     left.reference === right.reference &&
     left.query === right.query &&
+    haveSameProjectJiraOverrides(left.projectJiraOverrides, right.projectJiraOverrides) &&
     haveSameProjectSonarOverrides(left.projectSonarOverrides, right.projectSonarOverrides) &&
+    haveSameJiraProjectKeys(left.jiraProjectKeys, right.jiraProjectKeys) &&
     left.sonarProjectKey === right.sonarProjectKey &&
     left.webUrl === right.webUrl &&
     haveSameExclusions(left.exclusions, right.exclusions)
+  );
+}
+
+function haveSameProjectJiraOverrides(
+  left: SavedSourceProjectJiraOverride[],
+  right: SavedSourceProjectJiraOverride[],
+) {
+  return (
+    left.length === right.length &&
+    left.every((override, index) => {
+      const otherOverride = right[index];
+      return (
+        Boolean(otherOverride) &&
+        override.gitlabProjectId === otherOverride.gitlabProjectId &&
+        override.projectReference === otherOverride.projectReference &&
+        haveSameJiraProjectKeys(override.jiraProjectKeys, otherOverride.jiraProjectKeys)
+      );
+    })
   );
 }
 
@@ -342,6 +468,13 @@ function haveSameExclusions(left: SavedSourceExclusion[], right: SavedSourceExcl
         source.webUrl === otherSource.webUrl
       );
     })
+  );
+}
+
+function haveSameJiraProjectKeys(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((key, index) => key === right[index])
   );
 }
 

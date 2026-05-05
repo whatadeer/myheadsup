@@ -63,12 +63,55 @@ a {
   gap: 12px;
 }
 
-.eyebrow {
-  color: var(--accent);
-  font-size: 0.85rem;
+.hero-integrations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hero-integration {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font-size: 0.82rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  text-decoration: none;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+a.hero-integration:hover {
+  border-color: #111111;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.hero-integration-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+}
+
+.hero-integration-gitlab .hero-integration-icon {
+  background: #fc6d26;
+}
+
+.hero-integration-jira .hero-integration-icon {
+  background: #0c66e4;
+}
+
+.hero-integration-sonar .hero-integration-icon {
+  background: #4e9bcd;
 }
 
 .hero h1 {
@@ -476,6 +519,63 @@ a {
   backdrop-filter: blur(10px);
 }
 
+.debug-dock {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 40;
+  width: min(480px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.debug-dock-summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.debug-dock-summary::-webkit-details-marker {
+  display: none;
+}
+
+.debug-dock-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.debug-dock-row {
+  display: grid;
+  gap: 4px;
+}
+
+.debug-dock-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.debug-dock-value {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--foreground);
+  font-family: var(--font-geist-mono), "SFMono-Regular", Consolas, "Liberation Mono",
+    Menlo, monospace;
+  font-size: 0.77rem;
+}
+
 .refresh-dock-row {
   display: flex;
   align-items: center;
@@ -771,7 +871,7 @@ a {
 
 .metric-grid {
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
 }
 
 .project-detail-top-grid {
@@ -782,10 +882,10 @@ a {
 }
 
 .metric-card {
-  min-width: 140px;
-  flex: 1 1 160px;
-  padding: 16px;
-  border-radius: 16px;
+  min-width: 126px;
+  flex: 1 1 144px;
+  padding: 12px 14px;
+  border-radius: 14px;
   background: var(--surface-muted);
   border: 1px solid var(--border);
 }
@@ -831,21 +931,21 @@ a {
 .metric-label {
   display: block;
   color: var(--muted);
-  font-size: 0.83rem;
-  margin-bottom: 8px;
+  font-size: 0.78rem;
+  margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .metric-value {
   display: block;
-  font-size: 1.6rem;
+  font-size: 1.35rem;
   font-weight: 700;
 }
 
 .metric-card-toggle {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   justify-items: start;
   padding: 0;
   border: 0;
@@ -854,6 +954,15 @@ a {
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+.metric-card-content {
+  display: grid;
+  gap: 6px;
+}
+
+.metric-card-title-button {
+  margin-bottom: 6px;
 }
 
 .metric-value-link,
@@ -874,9 +983,9 @@ a {
 
 .metric-detail {
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.84rem;
   line-height: 1.4;
 }
 
@@ -1083,6 +1192,7 @@ a {
 .project-title-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
@@ -1148,8 +1258,8 @@ a {
 }
 
 .project-settings {
-  display: grid;
-  gap: 8px;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .project-settings > summary {
@@ -1161,22 +1271,45 @@ a {
 }
 
 .project-settings-gear {
-  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #ffffff;
   color: var(--muted);
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1;
   opacity: 0.7;
+  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
 }
 
 .project-settings-gear:hover {
   opacity: 1;
 }
 
+.project-settings[open] .project-settings-gear {
+  border-color: var(--border);
+  background: var(--surface-muted);
+  opacity: 1;
+}
+
 .project-settings-body {
   display: grid;
   gap: 10px;
-  padding-top: 2px;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(420px, calc(100vw - 56px));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
 }
 
 .project-settings-heading {
@@ -1278,6 +1411,43 @@ a {
   padding: 12px 14px;
 }
 
+.jira-definition-list {
+  display: grid;
+  gap: 6px;
+}
+
+.jira-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.jira-links-label {
+  font-weight: 600;
+}
+
+.jira-links-values,
+.jira-link-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.jira-link,
+.jira-link-fallback {
+  font-family: var(--font-geist-mono), "SFMono-Regular", Consolas, "Liberation Mono",
+    Menlo, monospace;
+}
+
+.jira-link {
+  color: #111111;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .sonar-trend-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1314,6 +1484,13 @@ a {
 .schedule-item-detail {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.schedule-run-shell {
+  display: inline-grid;
+  justify-items: start;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .next-runs {
@@ -1361,7 +1538,7 @@ a {
 
 .next-runs-item {
   display: grid;
-  grid-template-columns: minmax(160px, 1.2fr) minmax(160px, 2fr) auto;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(160px, 2fr) auto auto;
   gap: 12px;
   align-items: baseline;
   padding: 6px 0;
@@ -1597,6 +1774,11 @@ a {
 
   .refresh-dock {
     right: 16px;
+    bottom: 16px;
+  }
+
+  .debug-dock {
+    left: 16px;
     bottom: 16px;
   }
 }

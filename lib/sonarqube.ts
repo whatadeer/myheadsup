@@ -1,5 +1,6 @@
 import { createConcurrencyLimiter } from "./concurrency-limit";
 import { describeRequestError } from "./request-errors";
+import { preferRuntimeValue } from "./runtime-config";
 import { logServerError } from "./server-log";
 import type { RuntimeConfig, SonarMetricHistoryPoint, SonarProjectSummary } from "./types";
 
@@ -32,8 +33,8 @@ const sonarProjectCache = new Map<string, SonarProjectSummary | null>();
 const runSonarRequest = createConcurrencyLimiter(3);
 
 export function hasSonarQubeConfig(runtimeConfig?: RuntimeConfig | null) {
-  const baseUrl = runtimeConfig?.sonarQubeBaseUrl ?? process.env.SONARQUBE_BASE_URL?.trim() ?? "";
-  const token = runtimeConfig?.sonarQubeToken ?? process.env.SONARQUBE_TOKEN?.trim() ?? "";
+  const baseUrl = preferRuntimeValue(runtimeConfig?.sonarQubeBaseUrl, process.env.SONARQUBE_BASE_URL);
+  const token = preferRuntimeValue(runtimeConfig?.sonarQubeToken, process.env.SONARQUBE_TOKEN);
   return Boolean(baseUrl && token);
 }
 
@@ -122,10 +123,11 @@ async function fetchSonarQube<T>(
   path: string,
   runtimeConfig?: RuntimeConfig | null,
 ): Promise<T> {
-  const baseUrl = (
-    runtimeConfig?.sonarQubeBaseUrl ?? process.env.SONARQUBE_BASE_URL!.trim()
+  const baseUrl = preferRuntimeValue(
+    runtimeConfig?.sonarQubeBaseUrl,
+    process.env.SONARQUBE_BASE_URL,
   ).replace(/\/+$/, "");
-  const token = runtimeConfig?.sonarQubeToken ?? process.env.SONARQUBE_TOKEN!.trim();
+  const token = preferRuntimeValue(runtimeConfig?.sonarQubeToken, process.env.SONARQUBE_TOKEN);
   let response: Response;
 
   try {

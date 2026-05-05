@@ -1,16 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { JiraProjectLinks } from "@/components/jira-project-links";
+import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
 import { ProjectQueryExcludeForm } from "@/components/project-query-exclude-form";
+import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
 import { formatMergeRequestMeta } from "@/lib/merge-request-meta";
 import { labelPipeline, pipelineStatusEntries, projectPipelineStatus, statusTone } from "@/lib/pipeline";
-import type { GroupNode, ProjectSummary } from "@/lib/types";
+import type { GroupNode, ProjectSummary, RuntimeConfig } from "@/lib/types";
 
 type GroupTreeFilterProps = {
   group: GroupNode;
+  onScheduleTriggered?: () => void;
+  runtimeConfig?: RuntimeConfig | null;
   sourceId: string;
 };
 
@@ -19,13 +24,23 @@ type VisibleGroupNode = Omit<GroupNode, "projects" | "subgroups"> & {
   subgroups: VisibleGroupNode[];
 };
 
-export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
+export function GroupTreeFilter({
+  group,
+  onScheduleTriggered,
+  runtimeConfig,
+  sourceId,
+}: GroupTreeFilterProps) {
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showMergeRequestsOnly, setShowMergeRequestsOnly] = useState(false);
   const [showUnassignedMergeRequestsOnly, setShowUnassignedMergeRequestsOnly] = useState(false);
   const [showSchedulesOnly, setShowSchedulesOnly] = useState(false);
+  const [showWithoutSchedulesOnly, setShowWithoutSchedulesOnly] = useState(false);
+  const projectsWithoutSchedules = useMemo(
+    () => countProjects(group, (project) => project.schedules.total === 0),
+    [group],
+  );
   const visibleGroup = useMemo(
     () =>
       filterGroupNode(
@@ -36,6 +51,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
         showMergeRequestsOnly,
         showUnassignedMergeRequestsOnly,
         showSchedulesOnly,
+        showWithoutSchedulesOnly,
       ),
     [
       group,
@@ -45,6 +61,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
       showMergeRequestsOnly,
       showUnassignedMergeRequestsOnly,
       showSchedulesOnly,
+      showWithoutSchedulesOnly,
     ],
   );
 
@@ -115,14 +132,41 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
           label="Schedules"
           onClick={
             group.summary.schedules.total
-              ? () => setShowSchedulesOnly((currentValue) => !currentValue)
+              ? () => {
+                  setShowSchedulesOnly((currentValue) => !currentValue);
+                  setShowWithoutSchedulesOnly(false);
+                }
               : undefined
           }
           value={`${group.summary.schedules.active} of ${group.summary.schedules.total}`}
         />
+        <MetricCard
+          active={showWithoutSchedulesOnly}
+          detail={
+            projectsWithoutSchedules
+              ? showWithoutSchedulesOnly
+                ? "Showing only projects without schedules"
+                : "Click to filter projects without schedules"
+              : "Every project has a schedule"
+          }
+          label="Without schedules"
+          onClick={
+            projectsWithoutSchedules
+              ? () => {
+                  setShowWithoutSchedulesOnly((currentValue) => !currentValue);
+                  setShowSchedulesOnly(false);
+                }
+              : undefined
+          }
+          value={projectsWithoutSchedules}
+        />
       </div>
 
-      <NextScheduledRuns group={group} />
+      <NextScheduledRuns
+        group={group}
+        onScheduleTriggered={onScheduleTriggered}
+        runtimeConfig={runtimeConfig}
+      />
 
       <div className="summary-stack">
         <PipelineHistogram
@@ -169,7 +213,9 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
             {visibleGroup.projects.map((project) => (
               <ProjectRow
                 key={project.id}
+                onScheduleTriggered={onScheduleTriggered}
                 project={project}
+                runtimeConfig={runtimeConfig}
                 selectedDate={selectedDate}
                 sourceId={sourceId}
               />
@@ -181,6 +227,8 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
           <GroupTreeNode
             group={subgroup}
             key={subgroup.id}
+            onScheduleTriggered={onScheduleTriggered}
+            runtimeConfig={runtimeConfig}
             selectedDate={selectedDate}
             sourceId={sourceId}
           />
@@ -193,6 +241,7 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
             {showMergeRequestsOnly ? " with open merge requests" : ""}
             {showUnassignedMergeRequestsOnly ? " with unassigned merge requests" : ""}
             {showSchedulesOnly ? " with schedules" : ""}
+            {showWithoutSchedulesOnly ? " without schedules" : ""}
             {selectedStatus ? ` ${labelPipeline(selectedStatus).toLowerCase()}` : ""}
             {selectedDate ? ` on ${formatSelectedDate(selectedDate)}` : ""}
             {" "}
@@ -206,10 +255,14 @@ export function GroupTreeFilter({ group, sourceId }: GroupTreeFilterProps) {
 
 function GroupTreeNode({
   group,
+  onScheduleTriggered,
+  runtimeConfig,
   selectedDate,
   sourceId,
 }: {
   group: VisibleGroupNode;
+  onScheduleTriggered?: () => void;
+  runtimeConfig?: RuntimeConfig | null;
   selectedDate: string | null;
   sourceId: string;
 }) {
@@ -239,7 +292,9 @@ function GroupTreeNode({
           {group.projects.map((project) => (
             <ProjectRow
               key={project.id}
+              onScheduleTriggered={onScheduleTriggered}
               project={project}
+              runtimeConfig={runtimeConfig}
               selectedDate={selectedDate}
               sourceId={sourceId}
             />
@@ -248,6 +303,8 @@ function GroupTreeNode({
             <GroupTreeNode
               group={subgroup}
               key={subgroup.id}
+              onScheduleTriggered={onScheduleTriggered}
+              runtimeConfig={runtimeConfig}
               selectedDate={selectedDate}
               sourceId={sourceId}
             />
@@ -259,11 +316,15 @@ function GroupTreeNode({
 }
 
 function ProjectRow({
+  onScheduleTriggered,
   project,
+  runtimeConfig,
   selectedDate,
   sourceId,
 }: {
+  onScheduleTriggered?: () => void;
   project: ProjectSummary;
+  runtimeConfig?: RuntimeConfig | null;
   selectedDate: string | null;
   sourceId: string;
 }) {
@@ -295,6 +356,14 @@ function ProjectRow({
               </summary>
               <div className="project-settings-body">
                 <div className="project-settings-heading">Project settings</div>
+                <ProjectJiraKeyForm
+                  currentKeys={project.jiraProjectKeys}
+                  embedded
+                  jiraBaseUrl={project.jiraBaseUrl}
+                  projectId={project.id}
+                  projectReference={project.pathWithNamespace}
+                  sourceId={sourceId}
+                />
                 <ProjectSonarKeyForm
                   currentKey={project.sonarProjectKey}
                   embedded
@@ -313,6 +382,11 @@ function ProjectRow({
             </details>
           </div>
           <span className="source-subtitle">{project.pathWithNamespace}</span>
+          <JiraProjectLinks
+            baseUrl={project.jiraBaseUrl}
+            jiraProjectKeys={project.jiraProjectKeys}
+            label="Jira projects"
+          />
           <div className="summary-stack project-tab-shell">
             <div className="section-heading-row">
               <span className="section-heading">Detail tabs</span>
@@ -361,7 +435,12 @@ function ProjectRow({
             </button>
           </div>
           </div>
-          <ProjectTabPanel project={project} selectedTab={selectedTab} />
+          <ProjectTabPanel
+            onScheduleTriggered={onScheduleTriggered}
+            project={project}
+            runtimeConfig={runtimeConfig}
+            selectedTab={selectedTab}
+          />
         </div>
       </div>
       <div className="project-stats">
@@ -404,10 +483,14 @@ function ProjectRow({
 }
 
 function ProjectTabPanel({
+  onScheduleTriggered,
   project,
+  runtimeConfig,
   selectedTab,
 }: {
+  onScheduleTriggered?: () => void;
   project: ProjectSummary;
+  runtimeConfig?: RuntimeConfig | null;
   selectedTab: "issues" | "merge-requests" | "schedules";
 }) {
   if (selectedTab === "issues") {
@@ -463,6 +546,12 @@ function ProjectTabPanel({
                   {formatScheduleDate(schedule.nextRunAt)}
                   {schedule.ref ? ` - ${schedule.ref}` : ""}
                 </span>
+                <ScheduleRunButton
+                  onTriggered={onScheduleTriggered}
+                  projectId={project.id}
+                  runtimeConfig={runtimeConfig}
+                  scheduleId={schedule.id}
+                />
               </div>
             ))}
           </div>
@@ -559,6 +648,7 @@ function filterGroupNode(
   showMergeRequestsOnly: boolean,
   showUnassignedMergeRequestsOnly: boolean,
   showSchedulesOnly: boolean,
+  showWithoutSchedulesOnly: boolean,
 ): VisibleGroupNode {
   if (
     !selectedStatus &&
@@ -566,13 +656,14 @@ function filterGroupNode(
     !showIssuesOnly &&
     !showMergeRequestsOnly &&
     !showUnassignedMergeRequestsOnly &&
-    !showSchedulesOnly
+    !showSchedulesOnly &&
+    !showWithoutSchedulesOnly
   ) {
     return {
       ...group,
       projects: group.projects,
       subgroups: group.subgroups.map((subgroup) =>
-        filterGroupNode(subgroup, null, null, false, false, false, false),
+        filterGroupNode(subgroup, null, null, false, false, false, false, false),
       ),
     };
   }
@@ -594,6 +685,9 @@ function filterGroupNode(
       const matchesSchedules = showSchedulesOnly
         ? project.schedules.total > 0
         : true;
+      const matchesWithoutSchedules = showWithoutSchedulesOnly
+        ? project.schedules.total === 0
+        : true;
 
       return (
         matchesStatus &&
@@ -601,7 +695,8 @@ function filterGroupNode(
         matchesIssues &&
         matchesMergeRequests &&
         matchesUnassignedMergeRequests &&
-        matchesSchedules
+        matchesSchedules &&
+        matchesWithoutSchedules
       );
     }),
     subgroups: group.subgroups
@@ -614,6 +709,7 @@ function filterGroupNode(
           showMergeRequestsOnly,
           showUnassignedMergeRequestsOnly,
           showSchedulesOnly,
+          showWithoutSchedulesOnly,
         ),
       )
       .filter((subgroup) => subgroup.projects.length || subgroup.subgroups.length),
@@ -640,9 +736,11 @@ function MetricCard({
   if (onClick && !valueHref) {
     return (
       <button className={className} onClick={onClick} type="button">
-        <span className="metric-label">{label}</span>
-        <span className="metric-value">{value}</span>
-        {detail ? <span className="metric-detail">{detail}</span> : null}
+        <span className="metric-card-content">
+          <span className="metric-label">{label}</span>
+          <span className="metric-value">{value}</span>
+          {detail ? <span className="metric-detail">{detail}</span> : null}
+        </span>
       </button>
     );
   }
@@ -650,15 +748,13 @@ function MetricCard({
   return (
     <div className={className}>
       {onClick ? (
-        <button className="metric-card-toggle" onClick={onClick} type="button">
+        <button className="metric-card-toggle metric-card-title-button" onClick={onClick} type="button">
           <span className="metric-label">{label}</span>
-          {detail ? <span className="metric-detail">{detail}</span> : null}
         </button>
       ) : (
-        <>
-          <span className="metric-label">{label}</span>
-          {detail ? <span className="metric-detail">{detail}</span> : null}
-        </>
+        <span className="metric-label">
+          {label}
+        </span>
       )}
       {valueHref ? (
         <a className="metric-value metric-value-link" href={valueHref} rel="noreferrer" target="_blank">
@@ -667,8 +763,25 @@ function MetricCard({
       ) : (
         <span className="metric-value">{value}</span>
       )}
+      {detail ? <span className="metric-detail">{detail}</span> : null}
     </div>
   );
+}
+
+function countProjects(group: GroupNode, predicate: (project: ProjectSummary) => boolean) {
+  let total = 0;
+
+  for (const project of group.projects) {
+    if (predicate(project)) {
+      total += 1;
+    }
+  }
+
+  for (const subgroup of group.subgroups) {
+    total += countProjects(subgroup, predicate);
+  }
+
+  return total;
 }
 
 function hasPipelineActivityOnDate(project: ProjectSummary, selectedDate: string) {
@@ -704,7 +817,15 @@ function collectNextRuns(group: GroupNode): NextRunEntry[] {
   );
 }
 
-function NextScheduledRuns({ group }: Readonly<{ group: GroupNode }>) {
+function NextScheduledRuns({
+  group,
+  onScheduleTriggered,
+  runtimeConfig,
+}: Readonly<{
+  group: GroupNode;
+  onScheduleTriggered?: () => void;
+  runtimeConfig?: RuntimeConfig | null;
+}>) {
   const entries = useMemo(() => collectNextRuns(group), [group]);
 
   if (!entries.length) {
@@ -733,6 +854,12 @@ function NextScheduledRuns({ group }: Readonly<{ group: GroupNode }>) {
                 {schedule.description || schedule.ref || `Schedule ${schedule.id}`}
               </span>
               <span className="next-runs-when">{formatScheduleDate(schedule.nextRunAt)}</span>
+              <ScheduleRunButton
+                onTriggered={onScheduleTriggered}
+                projectId={project.id}
+                runtimeConfig={runtimeConfig}
+                scheduleId={schedule.id}
+              />
             </li>
           ))}
         </ul>

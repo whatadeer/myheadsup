@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { addSourceAction, removeSourceAction } from "@/app/actions";
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { addSourceAction, removeSourceAction, updateGroupDefinitionAction } from "@/app/actions";
 import { DashboardRefreshStatus } from "@/components/dashboard-refresh-status";
 import { GroupTreeFilter } from "@/components/group-tree-filter";
 import { JiraProjectLinks } from "@/components/jira-project-links";
@@ -9,10 +9,12 @@ import { LoadingStatus } from "@/components/loading-status";
 import { ProjectDetailTabs } from "@/components/project-detail-tabs";
 import { RuntimeConfigSetup } from "@/components/runtime-config-setup";
 import { SourceForm } from "@/components/source-form";
+import { formatProjectLanguages } from "@/lib/project-languages";
+import { reconcileDashboardsWithSavedSources } from "@/lib/source-dashboard";
 import { sanitizeRuntimeConfig } from "@/lib/runtime-config";
 import { describeRequestError } from "@/lib/request-errors";
 import { labelPipeline, statusTone } from "@/lib/pipeline";
-import type { RuntimeConfig, SavedSource, SourceDashboard } from "@/lib/types";
+import type { ActionState, RuntimeConfig, SavedSource, SourceDashboard } from "@/lib/types";
 
 const runtimeConfigStorageKey = "myheadsup.runtime-config";
 const autoRefreshEnabledStorageKey = "myheadsup.auto-refresh-enabled";
@@ -47,7 +49,7 @@ export function HomeContent({
     readStoredRuntimeConfigSnapshot,
     () => null,
   );
-  const [dashboards, setDashboards] = useState<SourceDashboard[]>(initialDashboards);
+  const [loadedDashboards, setLoadedDashboards] = useState<SourceDashboard[]>(initialDashboards);
   const [runtimeDashboardError, setRuntimeDashboardError] = useState("");
   const [runtimeDashboardLoading, setRuntimeDashboardLoading] = useState(false);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(() =>
@@ -70,6 +72,10 @@ export function HomeContent({
   const hasBrowserRuntimeConfig = Boolean(serverConfigError && runtimeConfig);
   const canRefreshDashboards =
     savedSources.length > 0 && (!serverConfigError || hasBrowserRuntimeConfig);
+  const dashboards = useMemo(
+    () => reconcileDashboardsWithSavedSources(loadedDashboards, savedSources),
+    [loadedDashboards, savedSources],
+  );
   const showLiveDashboards = serverConfigError ? hasBrowserRuntimeConfig : true;
   const visibleDashboards = showLiveDashboards ? dashboards : [];
   const hasVisibleDashboardData = visibleDashboards.length > 0;
@@ -111,7 +117,7 @@ export function HomeContent({
           try {
             const response = await fetch("/api/dashboard", {
               body: JSON.stringify({
-                force: trigger === "manual",
+                force: trigger === "manual" || trigger === "auto",
                 runtimeConfig,
               }),
               headers: {
@@ -169,7 +175,7 @@ export function HomeContent({
 
         let preservedErrorCount = 0;
 
-        setDashboards((currentDashboards) => {
+        setLoadedDashboards((currentDashboards) => {
           const { dashboards: nextDashboards, preservedCount } = mergeDashboardsPreservingSuccess(
             currentDashboards,
             resolvedDashboards,
@@ -345,7 +351,7 @@ export function HomeContent({
     notifyRuntimeConfigChange();
     setRuntimeDashboardLoading(false);
     setRuntimeDashboardError("");
-    setDashboards([]);
+    setLoadedDashboards([]);
     setNextRefreshAt(0);
     setRefreshStatusText("Save browser settings to enable live refresh.");
   }
@@ -806,7 +812,12 @@ function SourceCard({
               <span className="badge">{dashboard.savedSource.kind}</span>
             </div>
             {dashboard.savedSource.kind === "group" ? (
-              <SourceQueryDisclosure label="Group definition" query={dashboard.savedSource.query} />
+              <SourceQueryDisclosure
+                editable
+                label="Group definition"
+                query={dashboard.savedSource.query}
+                sourceId={dashboard.savedSource.id}
+              />
             ) : (
               <p className="source-query">{dashboard.savedSource.query}</p>
             )}
@@ -863,6 +874,9 @@ function ProjectSourceCard({
               {project.pathWithNamespace}
             </a>
           </p>
+          <p className="project-language-summary">
+            Languages: {formatProjectLanguages(project.languages)}
+          </p>
           <JiraProjectLinks
             baseUrl={project.jiraBaseUrl}
             jiraProjectKeys={project.jiraProjectKeys}
@@ -906,7 +920,12 @@ function GroupSourceCard({
             <h2>{group.name}</h2>
             <span className="badge">group</span>
           </div>
-          <SourceQueryDisclosure label="Group definition" query={savedSource.query} />
+          <SourceQueryDisclosure
+            editable
+            label="Group definition"
+            query={savedSource.query}
+            sourceId={savedSource.id}
+          />
           <div className="meta-list">
             <span>{group.summary.projectCount} projects tracked</span>
             <span>{group.subgroups.length} nested groups</span>
@@ -925,6 +944,11 @@ function GroupSourceCard({
   );
 }
 
+const initialActionState: ActionState = {
+  status: "idle" as const,
+  message: "",
+};
+
 function RemoveSourceButton({ sourceId }: { sourceId: string }) {
   return (
     <form action={removeSourceAction}>
@@ -936,11 +960,111 @@ function RemoveSourceButton({ sourceId }: { sourceId: string }) {
   );
 }
 
-function SourceQueryDisclosure({ label, query }: { label: string; query: string }) {
+function SourceQueryDisclosure({
+  editable = false,
+  label,
+  query,
+  sourceId,
+}: {
+  editable?: boolean;
+  label: string;
+  query: string;
+  sourceId?: string;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftQuery, setDraftQuery] = useState(query);
+  const [state, formAction, pending] = useActionState(
+    async (previousState: typeof initialActionState, formData: FormData) => {
+      const nextState = await updateGroupDefinitionAction(previousState, formData);
+
+      if (nextState.status === "success") {
+        setIsEditing(false);
+      }
+
+      return nextState;
+    },
+    initialActionState,
+  );
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(query);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      setCopyState("error");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    }
+  }
+
   return (
     <details className="source-query-disclosure">
       <summary className="source-query-summary">{label}</summary>
-      <p className="source-query">{query}</p>
+      <div className="source-query-body">
+        {isEditing && editable && sourceId ? (
+          <form action={formAction} className="source-query-edit-form">
+            <input name="sourceId" type="hidden" value={sourceId} />
+            <textarea
+              className="input source-query-preview"
+              name="sourceQueryDefinition"
+              onChange={(event) => setDraftQuery(event.target.value)}
+              rows={Math.max(draftQuery.split("\n").length || 1, 3)}
+              spellCheck={false}
+              value={draftQuery}
+            />
+            <div className="source-query-actions">
+              <div className="source-query-actions-main">
+                <button className="subtle-action-button" disabled={pending} type="submit">
+                  {pending ? "Saving..." : "Save"}
+                </button>
+                <button
+                  className="subtle-action-button"
+                  disabled={pending}
+                  onClick={() => {
+                    setDraftQuery(query);
+                    setIsEditing(false);
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+              {state.message ? (
+                <span className={`form-message ${state.status}`}>{state.message}</span>
+              ) : null}
+            </div>
+          </form>
+        ) : (
+          <>
+            <p className="source-query">{query}</p>
+            <div className="source-query-actions">
+              <div className="source-query-actions-main">
+                <button className="subtle-action-button" onClick={handleCopy} type="button">
+                  Copy
+                </button>
+                {editable && sourceId ? (
+                  <button
+                    className="subtle-action-button"
+                    onClick={() => {
+                      setDraftQuery(query);
+                      setIsEditing(true);
+                    }}
+                    type="button"
+                  >
+                    Edit
+                  </button>
+                ) : null}
+              </div>
+              {copyState !== "idle" ? (
+                <span className={`form-message ${copyState === "error" ? "error" : "success"}`}>
+                  {copyState === "copied" ? "Copied" : "Copy failed"}
+                </span>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
     </details>
   );
 }

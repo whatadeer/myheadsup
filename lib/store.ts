@@ -79,6 +79,34 @@ export async function removeSource(sourceId: string) {
   await writeStore({ sources });
 }
 
+export async function updateSourceDefinition(
+  sourceId: string,
+  source: Omit<SavedSource, "id" | "createdAt" | "query">,
+) {
+  const store = await readStore();
+  const existingSource = store.sources.find((entry) => entry.id === sourceId);
+
+  if (!existingSource) {
+    throw new Error("That saved source no longer exists.");
+  }
+
+  const normalizedSource = normalizeSource(source);
+
+  existingSource.kind = normalizedSource.kind;
+  existingSource.gitlabId = normalizedSource.gitlabId;
+  existingSource.name = normalizedSource.name;
+  existingSource.reference = normalizedSource.reference;
+  existingSource.query = normalizedSource.query;
+  existingSource.exclusions = normalizedSource.exclusions;
+  existingSource.projectJiraOverrides = normalizedSource.projectJiraOverrides;
+  existingSource.projectSonarOverrides = normalizedSource.projectSonarOverrides;
+  existingSource.jiraProjectKeys = normalizedSource.jiraProjectKeys;
+  existingSource.sonarProjectKey = normalizedSource.sonarProjectKey;
+  existingSource.webUrl = normalizedSource.webUrl;
+
+  await writeStore(store);
+}
+
 export async function saveSourceProjectJiraOverride(
   sourceId: string,
   gitlabProjectId: number,

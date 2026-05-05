@@ -1,19 +1,23 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { loadSourceDashboards } from "@/lib/dashboard";
+import { loadBaseSourceDashboard } from "@/lib/dashboard";
 import { getGitLabConfigError } from "@/lib/gitlab";
 import { parseRuntimeConfigValue } from "@/lib/runtime-config";
 import { resolveJiraBaseUrl } from "@/lib/server-jira";
 import { logServerDebug, logServerError } from "@/lib/server-log";
+import {
+  materializeSourceDashboard,
+  type BaseSourceDashboard,
+} from "@/lib/source-dashboard";
 import { readSources } from "@/lib/store";
-import type { RuntimeConfig, SavedSource, SourceDashboard } from "@/lib/types";
+import type { RuntimeConfig, SavedSource } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const dashboardCacheTtlMs = 30_000;
-const dashboardResponseCache = new Map<
+const sourceDashboardCacheTtlMs = 30 * 60 * 1000;
+const sourceDashboardCache = new Map<
   string,
-  { expiresAt: number; dashboards: SourceDashboard[] }
+  { expiresAt: number; baseDashboard: BaseSourceDashboard }
 >();
 
 export async function POST(request: Request) {
@@ -34,24 +38,12 @@ export async function POST(request: Request) {
     }
 
     const savedSources = await readSources();
-    const cacheKey = buildDashboardCacheKey(savedSources, runtimeConfig);
-    const cachedDashboards = !force ? readCachedDashboards(cacheKey) : null;
+    const dashboards = await Promise.all(
+      savedSources.map((savedSource) =>
+        loadSourceDashboard(savedSource, runtimeConfig, force),
+      ),
+    );
 
-    if (cachedDashboards) {
-      logServerDebug("api-dashboard", "Serving cached dashboard payload", {
-        sourceCount: savedSources.length,
-        usesRuntimeConfig: Boolean(runtimeConfig),
-      });
-      return NextResponse.json({ dashboards: cachedDashboards });
-    }
-
-    logServerDebug("api-dashboard", "Loading dashboard payload", {
-      force,
-      sourceCount: savedSources.length,
-      usesRuntimeConfig: Boolean(runtimeConfig),
-    });
-    const dashboards = await loadSourceDashboards(savedSources, runtimeConfig);
-    writeCachedDashboards(cacheKey, dashboards);
     return NextResponse.json({ dashboards });
   } catch (error) {
     logServerError("api-dashboard", error);
@@ -65,56 +57,91 @@ export async function POST(request: Request) {
   }
 }
 
-function buildDashboardCacheKey(
-  savedSources: SavedSource[],
+async function loadSourceDashboard(
+  savedSource: SavedSource,
+  runtimeConfig?: RuntimeConfig | null,
+  force = false,
+) {
+  const cacheKey = buildSourceDashboardCacheKey(savedSource, runtimeConfig);
+  const cachedBaseDashboard = !force ? readCachedSourceDashboard(cacheKey) : null;
+
+  if (cachedBaseDashboard) {
+    logServerDebug("api-dashboard", "Serving cached source dashboard", {
+      sourceId: savedSource.id,
+      sourceKind: savedSource.kind,
+      sourceGitLabId: savedSource.gitlabId,
+      usesRuntimeConfig: Boolean(runtimeConfig),
+    });
+    return materializeSourceDashboard(savedSource, cachedBaseDashboard);
+  }
+
+  logServerDebug("api-dashboard", "Loading source dashboard", {
+    force,
+    sourceId: savedSource.id,
+    sourceKind: savedSource.kind,
+    sourceGitLabId: savedSource.gitlabId,
+    usesRuntimeConfig: Boolean(runtimeConfig),
+  });
+  const baseDashboard = await loadBaseSourceDashboard(savedSource, runtimeConfig);
+
+  if (!("error" in baseDashboard)) {
+    writeCachedSourceDashboard(cacheKey, baseDashboard);
+  }
+
+  return materializeSourceDashboard(savedSource, baseDashboard);
+}
+
+function buildSourceDashboardCacheKey(
+  savedSource: SavedSource,
   runtimeConfig?: RuntimeConfig | null,
 ) {
   const payload = JSON.stringify({
     jiraBaseUrl: resolveJiraBaseUrl(runtimeConfig),
     runtimeConfig: runtimeConfig ?? null,
-    savedSources: savedSources.map((source) => ({
-      gitlabId: source.gitlabId,
-      id: source.id,
-      jiraProjectKeys: source.jiraProjectKeys,
-      kind: source.kind,
-      projectJiraOverrides: source.projectJiraOverrides,
-      projectSonarOverrides: source.projectSonarOverrides,
-      query: source.query,
-      sonarProjectKey: source.sonarProjectKey,
-    })),
+    source: {
+      gitlabId: savedSource.gitlabId,
+      jiraProjectKeys: savedSource.jiraProjectKeys,
+      kind: savedSource.kind,
+      projectJiraOverrides: savedSource.projectJiraOverrides,
+      projectSonarOverrides: savedSource.projectSonarOverrides,
+      sonarProjectKey: savedSource.sonarProjectKey,
+    },
   });
 
   return createHash("sha256").update(payload).digest("hex");
 }
 
-function readCachedDashboards(cacheKey: string) {
-  const entry = dashboardResponseCache.get(cacheKey);
+function readCachedSourceDashboard(cacheKey: string) {
+  const entry = sourceDashboardCache.get(cacheKey);
 
   if (!entry) {
     return null;
   }
 
   if (entry.expiresAt <= Date.now()) {
-    dashboardResponseCache.delete(cacheKey);
+    sourceDashboardCache.delete(cacheKey);
     return null;
   }
 
-  return entry.dashboards;
+  return entry.baseDashboard;
 }
 
-function writeCachedDashboards(cacheKey: string, dashboards: SourceDashboard[]) {
-  dashboardResponseCache.set(cacheKey, {
-    dashboards,
-    expiresAt: Date.now() + dashboardCacheTtlMs,
+function writeCachedSourceDashboard(
+  cacheKey: string,
+  baseDashboard: BaseSourceDashboard,
+) {
+  sourceDashboardCache.set(cacheKey, {
+    baseDashboard,
+    expiresAt: Date.now() + sourceDashboardCacheTtlMs,
   });
 
-  if (dashboardResponseCache.size <= 50) {
+  if (sourceDashboardCache.size <= 200) {
     return;
   }
 
-  const oldestKey = dashboardResponseCache.keys().next().value;
+  const oldestKey = sourceDashboardCache.keys().next().value;
 
   if (oldestKey) {
-    dashboardResponseCache.delete(oldestKey);
+    sourceDashboardCache.delete(oldestKey);
   }
 }

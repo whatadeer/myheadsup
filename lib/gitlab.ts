@@ -5,6 +5,7 @@ import type {
   MergeRequestSummary,
   PipelineHistogramBucket,
   PipelineSummary,
+  ProjectLanguageSummary,
   ResolvedSource,
   ScheduleSummary,
   SourceSuggestion,
@@ -76,6 +77,8 @@ type GitLabScheduleResponse = {
   next_run_at?: string | null;
   ref?: string | null;
 };
+
+type GitLabProjectLanguagesResponse = Record<string, number>;
 
 const SEARCH_CACHE_TTL_MS = 60_000;
 const SEARCH_RESULT_LIMIT = 20;
@@ -336,6 +339,28 @@ export async function fetchScheduleSummary(
          nextRunAt: schedule.next_run_at ?? null,
          ref: schedule.ref ?? null,
        })),
+  };
+}
+
+export async function fetchProjectLanguages(
+  projectId: number,
+  runtimeConfig?: RuntimeConfig | null,
+): Promise<ProjectLanguageSummary> {
+  const languages = await fetchGitLab<GitLabProjectLanguagesResponse>(
+    `/projects/${projectId}/languages`,
+    runtimeConfig,
+  );
+  const items = Object.entries(languages)
+    .filter(([, percentage]) => Number.isFinite(percentage) && percentage > 0)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([name, percentage]) => ({
+      name,
+      percentage,
+    }));
+
+  return {
+    primary: items[0]?.name ?? null,
+    items,
   };
 }
 

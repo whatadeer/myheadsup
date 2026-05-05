@@ -7,9 +7,11 @@ import { parseSourceQuery } from "@/lib/source-query";
 import {
   addSource,
   addSourceExclusion,
+  readSources,
   removeSource,
   saveSourceProjectJiraOverride,
   saveSourceProjectSonarOverride,
+  updateSourceDefinition,
 } from "@/lib/store";
 import type {
   ActionState,
@@ -286,6 +288,174 @@ export async function excludeProjectFromSourceAction(
         error instanceof Error
           ? error.message
           : "Unable to exclude that project from the saved query.",
+    };
+  }
+}
+
+export async function excludeGroupFromSourceAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const sourceId = formData.get("sourceId");
+  const groupId = formData.get("groupId");
+  const groupName = formData.get("groupName");
+  const groupReference = formData.get("groupReference");
+  const groupWebUrl = formData.get("groupWebUrl");
+
+  if (
+    typeof sourceId !== "string" ||
+    !sourceId ||
+    typeof groupId !== "string" ||
+    !/^\d+$/.test(groupId) ||
+    typeof groupName !== "string" ||
+    !groupName.trim() ||
+    typeof groupReference !== "string" ||
+    !groupReference.trim() ||
+    typeof groupWebUrl !== "string" ||
+    !groupWebUrl.trim()
+  ) {
+    return {
+      status: "error",
+      message: "Unable to determine which group to exclude.",
+    };
+  }
+
+  try {
+    await addSourceExclusion(sourceId, {
+      gitlabId: Number(groupId),
+      kind: "group",
+      name: groupName.trim(),
+      reference: groupReference.trim(),
+      webUrl: groupWebUrl.trim(),
+    });
+    revalidatePath("/");
+
+    return {
+      status: "success",
+      message: `Excluded ${groupName.trim()} from the saved query.`,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Unable to exclude that group from the saved query.",
+    };
+  }
+}
+
+export async function updateGroupDefinitionAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const sourceId = formData.get("sourceId");
+  const sourceQueryDefinition = formData.get("sourceQueryDefinition");
+
+  if (typeof sourceId !== "string" || !sourceId) {
+    return {
+      status: "error",
+      message: "That saved source no longer exists.",
+    };
+  }
+
+  if (typeof sourceQueryDefinition !== "string" || !sourceQueryDefinition.trim()) {
+    return {
+      status: "error",
+      message: "Enter a saved group definition.",
+    };
+  }
+
+  try {
+    const existingSource = (await readSources()).find((source) => source.id === sourceId);
+
+    if (!existingSource) {
+      return {
+        status: "error",
+        message: "That saved source no longer exists.",
+      };
+    }
+
+    if (existingSource.kind !== "group") {
+      return {
+        status: "error",
+        message: "Only saved groups support inline group definition edits.",
+      };
+    }
+
+    const parsedQuery = parseSourceQuery(sourceQueryDefinition);
+    const [resolved, exclusions, projectJiraOverrides, projectSonarOverrides] = await Promise.all([
+      resolveSourceSelection(
+        parsedQuery.reference,
+        parsedQuery.reference,
+        parsedQuery.kind === "source" ? undefined : parsedQuery.kind,
+      ),
+      resolveExcludedSourceReferences(parsedQuery.exclusions),
+      resolveProjectJiraOverrides(parsedQuery.projectJiraOverrides),
+      resolveProjectSonarOverrides(parsedQuery.projectSonarOverrides),
+    ]);
+
+    if (resolved.kind !== "group") {
+      return {
+        status: "error",
+        message: 'Group definitions must start with "Add Group ...".',
+      };
+    }
+
+    if (resolved.gitlabId !== existingSource.gitlabId) {
+      return {
+        status: "error",
+        message: "Inline edits can refine this saved group, but cannot switch it to a different root group.",
+      };
+    }
+
+    if (parsedQuery.sonarProjectKey) {
+      return {
+        status: "error",
+        message: 'Saved groups cannot use "With SonarQube ...".',
+      };
+    }
+
+    if (parsedQuery.jiraProjectKeys.length) {
+      return {
+        status: "error",
+        message: 'Saved groups cannot use "With Jira ...".',
+      };
+    }
+
+    if (
+      exclusions.some(
+        (source) => source.kind === resolved.kind && source.gitlabId === resolved.gitlabId,
+      )
+    ) {
+      return {
+        status: "error",
+        message: "The saved source query cannot exclude the root group itself.",
+      };
+    }
+
+    await updateSourceDefinition(sourceId, {
+      exclusions,
+      gitlabId: resolved.gitlabId,
+      jiraProjectKeys: [],
+      kind: "group",
+      name: resolved.name,
+      projectJiraOverrides,
+      projectSonarOverrides,
+      reference: resolved.reference,
+      sonarProjectKey: null,
+      webUrl: resolved.webUrl,
+    });
+    revalidatePath("/");
+
+    return {
+      status: "success",
+      message: "Saved the group definition.",
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to update that group definition.",
     };
   }
 }

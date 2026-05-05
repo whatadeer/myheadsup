@@ -5,10 +5,15 @@ import {
   fetchOpenIssues,
   fetchLatestPipeline,
   fetchOpenMergeRequests,
+  fetchProjectLanguages,
   fetchProjectById,
   fetchScheduleSummary,
   fetchSubgroups,
 } from "./gitlab";
+import {
+  materializeSourceDashboard,
+  type BaseSourceDashboard,
+} from "./source-dashboard";
 import { resolveJiraBaseUrl } from "./server-jira";
 import { logServerError } from "./server-log";
 import { fetchSonarProjectSummary } from "./sonarqube";
@@ -19,7 +24,6 @@ import type {
   ProjectSummary,
   RuntimeConfig,
   SavedSource,
-  SourceDashboard,
 } from "./types";
 
 export async function loadSourceDashboards(
@@ -27,20 +31,21 @@ export async function loadSourceDashboards(
   runtimeConfig?: RuntimeConfig | null,
 ) {
   return Promise.all(
-    savedSources.map((source) => loadSourceDashboard(source, runtimeConfig)),
+    savedSources.map(async (source) =>
+      materializeSourceDashboard(source, await loadBaseSourceDashboard(source, runtimeConfig)),
+    ),
   );
 }
 
-async function loadSourceDashboard(
+export async function loadBaseSourceDashboard(
   savedSource: SavedSource,
   runtimeConfig?: RuntimeConfig | null,
-): Promise<SourceDashboard> {
+): Promise<BaseSourceDashboard> {
   try {
     if (savedSource.kind === "project") {
       const project = await fetchProjectById(savedSource.gitlabId, runtimeConfig);
       return {
         kind: "project",
-        savedSource,
         project: await buildProjectSummary(
           project,
           resolveJiraBaseUrl(runtimeConfig),
@@ -71,16 +76,10 @@ async function loadSourceDashboard(
       sonarProjectKeysByGitLabId,
       runtimeConfig,
     );
-    const filteredGroup = applyGroupExclusions(group, savedSource.exclusions);
-
-    if (!filteredGroup) {
-      throw new Error("This saved source excludes the root group itself.");
-    }
 
     return {
       kind: "group",
-      savedSource,
-      group: filteredGroup,
+      group,
     };
   } catch (error) {
     logServerError("source-dashboard", error, {
@@ -92,7 +91,6 @@ async function loadSourceDashboard(
       usesRuntimeConfig: Boolean(runtimeConfig),
     });
     return {
-      savedSource,
       error: error instanceof Error ? error.message : "Unable to load this source.",
     };
   }
@@ -157,10 +155,11 @@ async function buildProjectSummary(
       ? await fetchProjectById(project.id, runtimeConfig)
       : project;
 
-  const [issues, mergeRequests, schedules, latestPipeline, pipelineActivity, sonar] = await Promise.all([
+  const [issues, mergeRequests, schedules, languages, latestPipeline, pipelineActivity, sonar] = await Promise.all([
     fetchOpenIssues(project.id, runtimeConfig),
     fetchOpenMergeRequests(project.id, runtimeConfig),
     fetchScheduleSummary(project.id, runtimeConfig),
+    fetchProjectLanguages(project.id, runtimeConfig),
     fetchLatestPipeline(project.id, runtimeConfig),
     fetchPipelineActivity(project.id, runtimeConfig),
     fetchSonarProjectSummary(sonarProjectKey, runtimeConfig),
@@ -182,6 +181,7 @@ async function buildProjectSummary(
     mergeRequests: mergeRequests.items,
     sonar,
     schedules,
+    languages,
     latestPipeline,
     pipelineActivity,
   };
@@ -290,44 +290,4 @@ function normalizePipelineStatus(status?: string | null) {
     default:
       return "other";
   }
-}
-
-function applyGroupExclusions(
-  group: GroupNode,
-  exclusions: SavedSource["exclusions"],
-): GroupNode | null {
-  if (!exclusions.length) {
-    return group;
-  }
-
-  const excludedGroupIds = new Set(
-    exclusions.filter((source) => source.kind === "group").map((source) => source.gitlabId),
-  );
-  const excludedProjectIds = new Set(
-    exclusions.filter((source) => source.kind === "project").map((source) => source.gitlabId),
-  );
-
-  return pruneGroupNode(group, excludedGroupIds, excludedProjectIds);
-}
-
-function pruneGroupNode(
-  group: GroupNode,
-  excludedGroupIds: Set<number>,
-  excludedProjectIds: Set<number>,
-): GroupNode | null {
-  if (excludedGroupIds.has(group.id)) {
-    return null;
-  }
-
-  const projects = group.projects.filter((project) => !excludedProjectIds.has(project.id));
-  const subgroups = group.subgroups
-    .map((subgroup) => pruneGroupNode(subgroup, excludedGroupIds, excludedProjectIds))
-    .filter((subgroup): subgroup is GroupNode => Boolean(subgroup));
-
-  return {
-    ...group,
-    projects,
-    subgroups,
-    summary: summarizeGroup(projects, subgroups),
-  };
 }

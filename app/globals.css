@@ -190,6 +190,7 @@ a.hero-integration:hover {
 
 .setup-panel p,
 .source-subtitle,
+.project-language-summary,
 .meta-list,
 .helper-text,
 .form-message,
@@ -673,6 +674,32 @@ a.hero-integration:hover {
 .source-query-disclosure {
   display: grid;
   gap: 8px;
+}
+
+.source-query-body {
+  display: grid;
+  gap: 8px;
+  align-items: start;
+}
+
+.source-query-edit-form {
+  display: grid;
+  gap: 8px;
+}
+
+.source-query-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.source-query-actions-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .source-query-summary {
@@ -1187,6 +1214,11 @@ a.hero-integration:hover {
 .project-meta {
   display: grid;
   gap: 6px;
+}
+
+.project-language-summary {
+  display: block;
+  font-size: 0.88rem;
 }
 
 .project-title-row {

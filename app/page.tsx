@@ -18,12 +18,31 @@ export default async function Home() {
   return (
     <HomeContent
       initialDashboards={[]}
-      key={`${configError ?? "configured"}:${savedSources.map((source) => `${source.id}:${source.query}`).join("|")}`}
+      key={buildHomeContentKey(savedSources, configError)}
       savedSources={savedSources}
       showDebugUrls={debugMode}
       serverConfigError={configError}
       serverUrls={serverUrls}
     />
   );
+}
+
+function buildHomeContentKey(
+  savedSources: Awaited<ReturnType<typeof readSources>>,
+  configError: string | null,
+) {
+  return `${configError ?? "configured"}:${savedSources
+    .map((source) =>
+      JSON.stringify({
+        id: source.id,
+        kind: source.kind,
+        gitlabId: source.gitlabId,
+        jiraProjectKeys: source.jiraProjectKeys,
+        sonarProjectKey: source.sonarProjectKey,
+        projectJiraOverrides: source.projectJiraOverrides,
+        projectSonarOverrides: source.projectSonarOverrides,
+      }),
+    )
+    .join("|")}`;
 }
 

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { JiraProjectLinks } from "@/components/jira-project-links";
+import { GroupQueryExcludeForm } from "@/components/group-query-exclude-form";
 import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
 import { ProjectQueryExcludeForm } from "@/components/project-query-exclude-form";
@@ -9,6 +10,7 @@ import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
 import { formatMergeRequestMeta } from "@/lib/merge-request-meta";
+import { formatProjectLanguages, labelPrimaryLanguage } from "@/lib/project-languages";
 import { labelPipeline, pipelineStatusEntries, projectPipelineStatus, statusTone } from "@/lib/pipeline";
 import type { GroupNode, ProjectSummary, RuntimeConfig } from "@/lib/types";
 
@@ -37,15 +39,18 @@ export function GroupTreeFilter({
   const [showUnassignedMergeRequestsOnly, setShowUnassignedMergeRequestsOnly] = useState(false);
   const [showSchedulesOnly, setShowSchedulesOnly] = useState(false);
   const [showWithoutSchedulesOnly, setShowWithoutSchedulesOnly] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const projectsWithoutSchedules = useMemo(
     () => countProjects(group, (project) => project.schedules.total === 0),
     [group],
   );
+  const languageEntries = useMemo(() => primaryLanguageEntries(group), [group]);
   const visibleGroup = useMemo(
     () =>
       filterGroupNode(
         group,
         selectedStatus,
+        selectedLanguage,
         selectedDate,
         showIssuesOnly,
         showMergeRequestsOnly,
@@ -55,6 +60,7 @@ export function GroupTreeFilter({
       ),
     [
       group,
+      selectedLanguage,
       selectedDate,
       selectedStatus,
       showIssuesOnly,
@@ -181,6 +187,33 @@ export function GroupTreeFilter({
       </div>
 
       <div className="summary-stack">
+        <h3 className="section-heading">Primary language</h3>
+        <div className="status-list">
+          <button
+            className={`status-pill status-filter-button${selectedLanguage === null ? " active" : ""}`}
+            onClick={() => setSelectedLanguage(null)}
+            type="button"
+          >
+            All {group.summary.projectCount}
+          </button>
+          {languageEntries.map(([language, count]) => (
+            <button
+              className={`status-pill status-filter-button${selectedLanguage === language ? " active" : ""}`}
+              key={language}
+              onClick={() =>
+                setSelectedLanguage((currentLanguage) =>
+                  currentLanguage === language ? null : language,
+                )
+              }
+              type="button"
+            >
+              {labelPrimaryLanguage(language)} {count}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="summary-stack">
         <h3 className="section-heading">Latest pipeline status across projects</h3>
         <div className="status-list">
           <button
@@ -242,6 +275,7 @@ export function GroupTreeFilter({
             {showUnassignedMergeRequestsOnly ? " with unassigned merge requests" : ""}
             {showSchedulesOnly ? " with schedules" : ""}
             {showWithoutSchedulesOnly ? " without schedules" : ""}
+            {selectedLanguage ? ` for ${selectedLanguage}` : ""}
             {selectedStatus ? ` ${labelPipeline(selectedStatus).toLowerCase()}` : ""}
             {selectedDate ? ` on ${formatSelectedDate(selectedDate)}` : ""}
             {" "}
@@ -273,6 +307,13 @@ function GroupTreeNode({
           <div className="summary-stack">
             <h3>{group.name}</h3>
             <span className="group-node-path">{group.fullPath}</span>
+            <GroupQueryExcludeForm
+              groupId={group.id}
+              groupName={group.name}
+              groupReference={group.fullPath}
+              groupWebUrl={group.webUrl}
+              sourceId={sourceId}
+            />
           </div>
           <div className="group-node-summary">
             <span>{group.projects.length} visible projects</span>
@@ -382,6 +423,9 @@ function ProjectRow({
             </details>
           </div>
           <span className="source-subtitle">{project.pathWithNamespace}</span>
+          <span className="project-language-summary">
+            Languages: {formatProjectLanguages(project.languages)}
+          </span>
           <JiraProjectLinks
             baseUrl={project.jiraBaseUrl}
             jiraProjectKeys={project.jiraProjectKeys}
@@ -643,6 +687,7 @@ function formatPercent(value: number | null, label: string) {
 function filterGroupNode(
   group: GroupNode,
   selectedStatus: string | null,
+  selectedLanguage: string | null,
   selectedDate: string | null,
   showIssuesOnly: boolean,
   showMergeRequestsOnly: boolean,
@@ -652,6 +697,7 @@ function filterGroupNode(
 ): VisibleGroupNode {
   if (
     !selectedStatus &&
+    !selectedLanguage &&
     !selectedDate &&
     !showIssuesOnly &&
     !showMergeRequestsOnly &&
@@ -663,7 +709,7 @@ function filterGroupNode(
       ...group,
       projects: group.projects,
       subgroups: group.subgroups.map((subgroup) =>
-        filterGroupNode(subgroup, null, null, false, false, false, false, false),
+        filterGroupNode(subgroup, null, null, null, false, false, false, false, false),
       ),
     };
   }
@@ -673,6 +719,9 @@ function filterGroupNode(
     projects: group.projects.filter((project) => {
       const matchesStatus = selectedStatus
         ? projectPipelineStatus(project) === selectedStatus
+        : true;
+      const matchesLanguage = selectedLanguage
+        ? project.languages.primary === selectedLanguage
         : true;
       const matchesDate = selectedDate ? hasPipelineActivityOnDate(project, selectedDate) : true;
       const matchesIssues = showIssuesOnly ? project.openIssues > 0 : true;
@@ -691,6 +740,7 @@ function filterGroupNode(
 
       return (
         matchesStatus &&
+        matchesLanguage &&
         matchesDate &&
         matchesIssues &&
         matchesMergeRequests &&
@@ -704,6 +754,7 @@ function filterGroupNode(
         filterGroupNode(
           subgroup,
           selectedStatus,
+          selectedLanguage,
           selectedDate,
           showIssuesOnly,
           showMergeRequestsOnly,
@@ -782,6 +833,25 @@ function countProjects(group: GroupNode, predicate: (project: ProjectSummary) =>
   }
 
   return total;
+}
+
+function primaryLanguageEntries(group: GroupNode) {
+  const counts = new Map<string, number>();
+
+  countProjects(group, (project) => {
+    const language = project.languages.primary;
+
+    if (!language) {
+      return false;
+    }
+
+    counts.set(language, (counts.get(language) ?? 0) + 1);
+    return false;
+  });
+
+  return [...counts.entries()].sort(
+    (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+  );
 }
 
 function hasPipelineActivityOnDate(project: ProjectSummary, selectedDate: string) {

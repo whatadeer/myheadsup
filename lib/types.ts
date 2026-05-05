@@ -136,6 +136,16 @@ export type ScheduleWindowEntry = {
   ref: string | null;
 };
 
+export type ProjectLanguageShare = {
+  name: string;
+  percentage: number;
+};
+
+export type ProjectLanguageSummary = {
+  primary: string | null;
+  items: ProjectLanguageShare[];
+};
+
 export type ProjectSummary = {
   id: number;
   name: string;
@@ -151,6 +161,7 @@ export type ProjectSummary = {
   mergeRequests: MergeRequestSummary[];
   sonar: SonarProjectSummary | null;
   schedules: ScheduleSummary;
+  languages: ProjectLanguageSummary;
   latestPipeline: PipelineSummary | null;
   pipelineActivity: PipelineHistogramBucket[];
 };

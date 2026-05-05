@@ -43,11 +43,10 @@ export async function loadBaseSourceDashboard(
 ): Promise<BaseSourceDashboard> {
   try {
     if (savedSource.kind === "project") {
-      const project = await fetchProjectById(savedSource.gitlabId, runtimeConfig);
       return {
         kind: "project",
-        project: await buildProjectSummary(
-          project,
+        project: await loadProjectSummary(
+          savedSource.gitlabId,
           resolveJiraBaseUrl(runtimeConfig),
           savedSource.jiraProjectKeys,
           savedSource.sonarProjectKey,
@@ -94,6 +93,56 @@ export async function loadBaseSourceDashboard(
       error: error instanceof Error ? error.message : "Unable to load this source.",
     };
   }
+}
+
+export async function refreshSavedSourceProject(
+  savedSource: SavedSource,
+  projectId: number,
+  baseDashboard: BaseSourceDashboard | null,
+  runtimeConfig?: RuntimeConfig | null,
+): Promise<BaseSourceDashboard> {
+  if (savedSource.kind === "project") {
+    if (savedSource.gitlabId !== projectId) {
+      throw new Error("That project does not belong to this saved source.");
+    }
+
+    return loadBaseSourceDashboard(savedSource, runtimeConfig);
+  }
+
+  if (!baseDashboard || "error" in baseDashboard || baseDashboard.kind !== "group") {
+    return loadBaseSourceDashboard(savedSource, runtimeConfig);
+  }
+
+  const jiraBaseUrl = resolveJiraBaseUrl(runtimeConfig);
+  const jiraProjectKeysByGitLabId = new Map(
+    savedSource.projectJiraOverrides.map((override) => [
+      override.gitlabProjectId,
+      override.jiraProjectKeys,
+    ]),
+  );
+  const sonarProjectKeysByGitLabId = new Map(
+    savedSource.projectSonarOverrides.map((override) => [
+      override.gitlabProjectId,
+      override.sonarProjectKey,
+    ]),
+  );
+  const refreshed = await refreshProjectInGroupNode(
+    baseDashboard.group,
+    projectId,
+    jiraBaseUrl,
+    jiraProjectKeysByGitLabId,
+    sonarProjectKeysByGitLabId,
+    runtimeConfig,
+  );
+
+  if (!refreshed.found) {
+    throw new Error("That project is no longer part of this saved group.");
+  }
+
+  return {
+    kind: "group",
+    group: refreshed.group,
+  };
 }
 
 async function buildGroupNode(
@@ -143,6 +192,22 @@ async function buildGroupNode(
   };
 }
 
+export async function loadProjectSummary(
+  projectId: number,
+  jiraBaseUrl: string | null,
+  jiraProjectKeys: string[],
+  sonarProjectKey: string | null,
+  runtimeConfig?: RuntimeConfig | null,
+) {
+  return buildProjectSummary(
+    await fetchProjectById(projectId, runtimeConfig),
+    jiraBaseUrl,
+    jiraProjectKeys,
+    sonarProjectKey,
+    runtimeConfig,
+  );
+}
+
 async function buildProjectSummary(
   project: GitLabProjectRef,
   jiraBaseUrl: string | null,
@@ -185,6 +250,60 @@ async function buildProjectSummary(
     languages,
     latestPipeline,
     pipelineActivity,
+  };
+}
+
+async function refreshProjectInGroupNode(
+  group: GroupNode,
+  projectId: number,
+  jiraBaseUrl: string | null,
+  jiraProjectKeysByGitLabId: Map<number, string[]>,
+  sonarProjectKeysByGitLabId: Map<number, string | null>,
+  runtimeConfig?: RuntimeConfig | null,
+) {
+  let found = false;
+
+  const projects = await Promise.all(
+    group.projects.map(async (project) => {
+      if (project.id !== projectId) {
+        return project;
+      }
+
+      found = true;
+      return loadProjectSummary(
+        project.id,
+        jiraBaseUrl,
+        jiraProjectKeysByGitLabId.get(project.id) ?? [],
+        sonarProjectKeysByGitLabId.get(project.id) ?? null,
+        runtimeConfig,
+      );
+    }),
+  );
+
+  const subgroupResults = await Promise.all(
+    group.subgroups.map((subgroup) =>
+      refreshProjectInGroupNode(
+        subgroup,
+        projectId,
+        jiraBaseUrl,
+        jiraProjectKeysByGitLabId,
+        sonarProjectKeysByGitLabId,
+        runtimeConfig,
+      ),
+    ),
+  );
+  const subgroups = subgroupResults.map((result) => result.group);
+  found ||= subgroupResults.some((result) => result.found);
+
+  return {
+    found,
+    group: {
+      ...group,
+      jiraBaseUrl,
+      projects,
+      subgroups,
+      summary: summarizeGroup(projects, subgroups),
+    },
   };
 }
 

@@ -11,6 +11,7 @@ import { RuntimeConfigSetup } from "@/components/runtime-config-setup";
 import { SourceForm } from "@/components/source-form";
 import { formatProjectLanguages } from "@/lib/project-languages";
 import { reconcileDashboardsWithSavedSources } from "@/lib/source-dashboard";
+import { formatSourceQueryExpanded } from "@/lib/source-query";
 import { sanitizeRuntimeConfig } from "@/lib/runtime-config";
 import { describeRequestError } from "@/lib/request-errors";
 import { labelPipeline, statusTone } from "@/lib/pipeline";
@@ -1103,8 +1104,10 @@ function SourceQueryDisclosure({
   sourceId?: string;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [displayMode, setDisplayMode] = useState<"compact" | "expanded">("compact");
   const [isEditing, setIsEditing] = useState(false);
   const [draftQuery, setDraftQuery] = useState(query);
+  const displayedQuery = displayMode === "expanded" ? formatSourceQueryExpanded(query) : query;
   const [state, formAction, pending] = useActionState(
     async (previousState: typeof initialActionState, formData: FormData) => {
       const nextState = await updateGroupDefinitionAction(previousState, formData);
@@ -1120,7 +1123,7 @@ function SourceQueryDisclosure({
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(query);
+      await navigator.clipboard.writeText(displayedQuery);
       setCopyState("copied");
       window.setTimeout(() => setCopyState("idle"), 2000);
     } catch {
@@ -1142,6 +1145,19 @@ function SourceQueryDisclosure({
         </div>
         {!isEditing ? (
           <div className="source-query-actions-main source-query-heading-actions">
+            {editable && sourceId ? (
+              <button
+                className="subtle-action-button"
+                onClick={() =>
+                  setDisplayMode((currentMode) =>
+                    currentMode === "compact" ? "expanded" : "compact",
+                  )
+                }
+                type="button"
+              >
+                {displayMode === "compact" ? "Expanded" : "Compact"}
+              </button>
+            ) : null}
             <button className="subtle-action-button" onClick={handleCopy} type="button">
               <span aria-hidden="true">Copy</span>
               <span className="sr-only"> group definition</span>
@@ -1150,7 +1166,7 @@ function SourceQueryDisclosure({
               <button
                 className="subtle-action-button"
                 onClick={() => {
-                  setDraftQuery(query);
+                  setDraftQuery(displayedQuery);
                   setIsEditing(true);
                 }}
                 type="button"
@@ -1182,7 +1198,7 @@ function SourceQueryDisclosure({
                 className="subtle-action-button"
                 disabled={pending}
                 onClick={() => {
-                  setDraftQuery(query);
+                  setDraftQuery(displayedQuery);
                   setIsEditing(false);
                 }}
                 type="button"
@@ -1196,7 +1212,7 @@ function SourceQueryDisclosure({
       ) : (
         <>
           <div className="source-query-body">
-            <p className="source-query source-query-surface">{query}</p>
+            <p className="source-query source-query-surface">{displayedQuery}</p>
           </div>
           {copyState !== "idle" ? (
             <span className={`form-message ${copyState === "error" ? "error" : "success"}`}>

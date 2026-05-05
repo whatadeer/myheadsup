@@ -234,3 +234,8 @@ export type DashboardResponsePayload = {
   dashboards: SourceDashboard[];
   snapshot: DashboardSnapshotSummary;
 };
+
+export type ProjectRefreshResponsePayload = {
+  dashboard: SourceDashboard;
+  message: string;
+};

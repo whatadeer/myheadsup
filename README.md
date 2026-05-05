@@ -10,7 +10,7 @@ MyHeadsUp is a personal dashboard for self-hosted GitLab. It lets you save the g
 - See merge request status, including unassigned, approval, and rebase-needed signals
 - Review latest pipeline status and 14-day pipeline activity
 - Inspect pipeline schedules and trigger upcoming schedules with **Run now**
-- Attach Jira project keys and SonarQube project keys at the source or per-project level
+- Attach Jira project keys and SonarQube project keys after saving a source, or through saved query lines
 - Use automatic refresh, manual refresh, and browser-stored fallback config
 - Install the app like a lightweight web app with the included manifest and service worker
 
@@ -31,7 +31,7 @@ SONARQUBE_TOKEN=your-sonarqube-token
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `GITLAB_BASE_URL` | Yes | Root URL for your GitLab instance, without `/api/v4` |
-| `GITLAB_TOKEN` | Yes | Personal access token with access to the groups and projects you want to browse |
+| `GITLAB_TOKEN` | Yes | Personal access token with access to the groups and projects you want to browse, and enough permission to trigger schedules if you want to use **Run now** |
 | `JIRA_BASE_URL` | No | Enables Jira project links when Jira keys are saved |
 | `SONARQUBE_BASE_URL` | No | Must be paired with `SONARQUBE_TOKEN` |
 | `SONARQUBE_TOKEN` | No | Must be paired with `SONARQUBE_BASE_URL` |
@@ -97,7 +97,7 @@ Traefik routes `http://myheadsup.localhost` to the app and exposes its dashboard
 2. Search accessible GitLab groups and projects from the combined picker, or paste a saved source query directly.
 3. Add a root group or project to the dashboard.
 4. For group sources, optionally exclude nested groups or projects.
-5. Optionally attach Jira project keys or SonarQube project keys.
+5. Add Jira project keys or SonarQube project keys later from the saved source, or include them in a pasted saved query.
 6. Use **Refresh now** or enable **Auto refresh** to keep the dashboard updated.
 
 Saved sources are written to `data\sources.json`, which is ignored by git.
@@ -112,8 +112,8 @@ Example:
 Add Group platform/team
 Without Groups platform/team/archive
 Without Projects platform/team/old-service
-With Jira Project platform/team/api = OPS, PLAT
-With SonarQube Project platform/team/web = platform-team-web
+With Project platform/team/api, Jira = OPS, PLAT
+With Project platform/team/web, SonarQube = platform-team-web
 ```
 
 Project sources can use direct Jira and SonarQube lines:
@@ -129,7 +129,8 @@ Rules:
 - `Add Group ...`, `Add Project ...`, or `Add Source ...` must be the first line
 - `Without Group(s) ...` and `Without Project(s) ...` apply only to saved group sources
 - `With Jira ...` and `With SonarQube ...` apply only to saved project sources
-- `With Jira Project ... = ...` and `With SonarQube Project ... = ...` apply only to saved group sources
+- `With Project project/path, Jira = ...` and `With Project project/path, SonarQube = ...` apply only to saved group sources
+- Legacy `With Jira Project ... = ...` and `With SonarQube Project ... = ...` lines still work for backward compatibility
 
 ## Refresh behavior
 

@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { after, NextResponse } from "next/server";
+import { buildSourceDashboardCacheKey } from "@/lib/dashboard-cache";
 import { loadBaseSourceDashboard } from "@/lib/dashboard";
 import {
   isDashboardSnapshotStale,
@@ -26,7 +26,6 @@ import type {
 export const dynamic = "force-dynamic";
 
 const sourceDashboardRefreshCooldownMs = 30 * 1000;
-const sourceDashboardCacheSchemaVersion = 3;
 const activeSourceDashboardRefreshes = new Map<string, Promise<SourceDashboardRefreshResult>>();
 const recentSourceDashboardRefreshAttempts = new Map<string, number>();
 
@@ -178,27 +177,6 @@ async function loadSourceDashboard(
     fetchedAt: snapshot.fetchedAt,
     isRefreshing: false,
   };
-}
-
-function buildSourceDashboardCacheKey(
-  savedSource: SavedSource,
-  runtimeConfig?: RuntimeConfig | null,
-) {
-  const payload = JSON.stringify({
-    schemaVersion: sourceDashboardCacheSchemaVersion,
-    jiraBaseUrl: resolveJiraBaseUrl(runtimeConfig),
-    runtimeConfig: runtimeConfig ?? null,
-    source: {
-      gitlabId: savedSource.gitlabId,
-      jiraProjectKeys: savedSource.jiraProjectKeys,
-      kind: savedSource.kind,
-      projectJiraOverrides: savedSource.projectJiraOverrides,
-      projectSonarOverrides: savedSource.projectSonarOverrides,
-      sonarProjectKey: savedSource.sonarProjectKey,
-    },
-  });
-
-  return createHash("sha256").update(payload).digest("hex");
 }
 
 function getOrStartSourceDashboardRefresh(

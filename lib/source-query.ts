@@ -33,6 +33,8 @@ export type ParsedSourceQuery = {
   projectSonarOverrides: ParsedProjectSonarOverride[];
 };
 
+const continuedLinePattern = /^\s+/;
+
 export function buildSourceQuery(
   kind: QuerySourceKind,
   reference: string,
@@ -78,15 +80,17 @@ export function buildSourceQuery(
     lines.push(`With SonarQube ${sonarProjectKey.trim()}`);
   }
 
-  for (const override of sortProjectJiraOverrides(projectJiraOverrides)) {
-    lines.push(`With Jira Project ${override.projectReference} = ${override.jiraProjectKeys.join(", ")}`);
-  }
-
-  for (const override of sortProjectSonarOverrides(projectSonarOverrides)) {
-    lines.push(`With SonarQube Project ${override.projectReference} = ${override.sonarProjectKey}`);
+  for (const override of mergeProjectOverrides(projectJiraOverrides, projectSonarOverrides)) {
+    lines.push(formatProjectOverrideLine(override));
   }
 
   return lines.join("\n");
+}
+
+export function formatSourceQueryExpanded(value: string) {
+  return toLogicalSourceQueryLines(value)
+    .map((line) => formatExpandedSourceQueryLine(line))
+    .join("\n");
 }
 
 export function sameSourceReference(
@@ -151,10 +155,7 @@ function sortProjectOverrides<
 }
 
 export function parseSourceQuery(value: string): ParsedSourceQuery {
-  const lines = value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = toLogicalSourceQueryLines(value);
 
   if (!lines.length) {
     throw new Error("Enter a saved source query or choose a group or project.");
@@ -173,6 +174,28 @@ export function parseSourceQuery(value: string): ParsedSourceQuery {
   let sonarProjectKey: string | null = null;
 
   for (const line of lines.slice(1)) {
+    const combinedProjectOverrideMatch = /^With\s+Project\s+(.+)$/i.exec(line);
+
+    if (combinedProjectOverrideMatch) {
+      const projectOverride = parseCombinedProjectOverride(combinedProjectOverrideMatch[1] ?? "", line);
+      const projectReferenceKey = projectOverride.projectReference.toLowerCase();
+
+      if (projectOverride.jiraProjectKeys.length) {
+        projectJiraOverrideMap.set(projectReferenceKey, {
+          projectReference: projectOverride.projectReference,
+          jiraProjectKeys: projectOverride.jiraProjectKeys,
+        });
+      }
+
+      if (projectOverride.sonarProjectKey) {
+        projectSonarOverrideMap.set(projectReferenceKey, {
+          projectReference: projectOverride.projectReference,
+          sonarProjectKey: projectOverride.sonarProjectKey,
+        });
+      }
+      continue;
+    }
+
     const projectJiraOverrideMatch = /^With\s+Jira\s+Project\s+(.+?)\s*=\s*(.+)$/i.exec(line);
 
     if (projectJiraOverrideMatch) {
@@ -300,4 +323,177 @@ function labelSourceKind(kind: QuerySourceKind) {
     default:
       return "Source";
   }
+}
+
+function mergeProjectOverrides(
+  projectJiraOverrides: SavedSourceProjectJiraOverride[],
+  projectSonarOverrides: SavedSourceProjectSonarOverride[],
+) {
+  const overrides = new Map<
+    string,
+    {
+      gitlabProjectId: number;
+      projectReference: string;
+      jiraProjectKeys: string[];
+      sonarProjectKey: string | null;
+    }
+  >();
+
+  for (const override of sortProjectJiraOverrides(projectJiraOverrides)) {
+    const key = override.projectReference.toLowerCase();
+    const existing = overrides.get(key);
+    overrides.set(key, {
+      gitlabProjectId: existing?.gitlabProjectId ?? override.gitlabProjectId,
+      projectReference: override.projectReference,
+      jiraProjectKeys: override.jiraProjectKeys,
+      sonarProjectKey: existing?.sonarProjectKey ?? null,
+    });
+  }
+
+  for (const override of sortProjectSonarOverrides(projectSonarOverrides)) {
+    const key = override.projectReference.toLowerCase();
+    const existing = overrides.get(key);
+    overrides.set(key, {
+      gitlabProjectId: existing?.gitlabProjectId ?? override.gitlabProjectId,
+      projectReference: override.projectReference,
+      jiraProjectKeys: existing?.jiraProjectKeys ?? [],
+      sonarProjectKey: override.sonarProjectKey,
+    });
+  }
+
+  return [...overrides.values()].sort((left, right) => {
+    const referenceOrder = left.projectReference.localeCompare(right.projectReference, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+    if (referenceOrder !== 0) {
+      return referenceOrder;
+    }
+
+    return left.gitlabProjectId - right.gitlabProjectId;
+  });
+}
+
+function formatProjectOverrideLine(override: {
+  projectReference: string;
+  jiraProjectKeys: string[];
+  sonarProjectKey: string | null;
+}) {
+  const segments = [`With Project ${override.projectReference}`];
+
+  if (override.jiraProjectKeys.length) {
+    segments.push(`Jira = ${override.jiraProjectKeys.join(", ")}`);
+  }
+
+  if (override.sonarProjectKey) {
+    segments.push(`SonarQube = ${override.sonarProjectKey}`);
+  }
+
+  return segments.join(", ");
+}
+
+function parseCombinedProjectOverride(value: string, originalLine: string) {
+  const segments = value
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const projectReference = segments.shift()?.trim() ?? "";
+
+  if (!projectReference || !segments.length) {
+    throw new Error(`Unable to parse saved source query line: ${originalLine}`);
+  }
+
+  let jiraProjectKeys: string[] = [];
+  let sonarProjectKey: string | null = null;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index] ?? "";
+    const jiraMatch = /^Jira\s*=\s*(.+)$/i.exec(segment);
+
+    if (jiraMatch) {
+      const jiraSegments = [jiraMatch[1] ?? ""];
+
+      while (index + 1 < segments.length && !/^(Jira|SonarQube)\s*=/i.test(segments[index + 1] ?? "")) {
+        jiraSegments.push(segments[index + 1] ?? "");
+        index += 1;
+      }
+
+      const nextKeys = normalizeJiraProjectKeys(jiraSegments.join(", "));
+      if (!nextKeys.length) {
+        throw new Error(`Unable to parse saved source query line: ${originalLine}`);
+      }
+
+      jiraProjectKeys = nextKeys;
+      continue;
+    }
+
+    const sonarMatch = /^SonarQube\s*=\s*(.+)$/i.exec(segment);
+    if (sonarMatch) {
+      const nextKey = sonarMatch[1]?.trim();
+      if (!nextKey) {
+        throw new Error(`Unable to parse saved source query line: ${originalLine}`);
+      }
+
+      sonarProjectKey = nextKey;
+      continue;
+    }
+
+    throw new Error(`Unable to parse saved source query line: ${originalLine}`);
+  }
+
+  if (!jiraProjectKeys.length && !sonarProjectKey) {
+    throw new Error(`Unable to parse saved source query line: ${originalLine}`);
+  }
+
+  return {
+    projectReference,
+    jiraProjectKeys,
+    sonarProjectKey,
+  };
+}
+
+function toLogicalSourceQueryLines(value: string) {
+  const lines: string[] = [];
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const trimmedLine = rawLine.trim();
+
+    if (!trimmedLine) {
+      continue;
+    }
+
+    if (continuedLinePattern.test(rawLine) && lines.length) {
+      lines[lines.length - 1] = `${lines[lines.length - 1]} ${trimmedLine}`;
+      continue;
+    }
+
+    lines.push(trimmedLine);
+  }
+
+  return lines;
+}
+
+function formatExpandedSourceQueryLine(line: string) {
+  const exclusionMatch = /^(Without\s+(?:Group|Groups|Project|Projects))\s+(.+)$/i.exec(line);
+
+  if (!exclusionMatch) {
+    return line;
+  }
+
+  const references = exclusionMatch[1] && exclusionMatch[2]
+    ? exclusionMatch[2]
+        .split(",")
+        .map((reference) => reference.trim())
+        .filter(Boolean)
+    : [];
+
+  if (!references.length) {
+    return line;
+  }
+
+  return `${exclusionMatch[1]}\n${references
+    .map((reference, index) => `\t${reference}${index < references.length - 1 ? "," : ""}`)
+    .join("\n")}`;
 }

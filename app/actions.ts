@@ -77,14 +77,14 @@ export async function addSourceAction(
       if (resolved.kind === "project" && projectSonarOverrides.length) {
         return {
           status: "error",
-          message: 'Only saved groups can use "With SonarQube Project ... = ...".',
+          message: 'Only saved groups can use project override lines like "With Project ...".',
         };
       }
 
       if (resolved.kind === "project" && projectJiraOverrides.length) {
         return {
           status: "error",
-          message: 'Only saved groups can use "With Jira Project ... = ...".',
+          message: 'Only saved groups can use project override lines like "With Project ...".',
         };
       }
 

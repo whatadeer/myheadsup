@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSourceQuery, parseSourceQuery } from "./source-query";
+import { buildSourceQuery, formatSourceQueryExpanded, parseSourceQuery } from "./source-query";
 
 describe("source query helpers", () => {
   it("builds a canonical saved group query", () => {
@@ -25,8 +25,8 @@ describe("source query helpers", () => {
         "Add Group platform/team",
         "Without Group platform/team/archive",
         "Without Project platform/team/api",
-        "With Jira Project platform/team/api = OPS, PLAT",
-        "With SonarQube Project platform/team/web = team-web",
+        "With Project platform/team/api, Jira = OPS, PLAT",
+        "With Project platform/team/web, SonarQube = team-web",
       ].join("\n"),
     );
   });
@@ -38,9 +38,9 @@ describe("source query helpers", () => {
           "Add Group platform/team",
           "Without Projects platform/team/api, platform/team/api",
           "Without Group platform/team/archive",
-          "With Jira Project platform/team/api = OPS-1, OPS-2",
+          "With Project platform/team/api, Jira = OPS-1, OPS-2",
           "With Jira Project Platform/Team/API = OPS-9",
-          "With SonarQube Project platform/team/web = team-web",
+          "With Project platform/team/web, SonarQube = team-web",
           "With SonarQube Project PLATFORM/TEAM/WEB = team-web-2",
         ].join("\n"),
       ),
@@ -60,6 +60,77 @@ describe("source query helpers", () => {
         { projectReference: "PLATFORM/TEAM/WEB", sonarProjectKey: "team-web-2" },
       ],
     });
+  });
+
+  it("parses combined project override lines with Jira and SonarQube together", () => {
+    expect(
+      parseSourceQuery(
+        [
+          "Add Group platform/team",
+          "With Project platform/team/api, Jira = DPT, DPT2, SonarQube = platform-team-api",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      kind: "group",
+      reference: "platform/team",
+      exclusions: [],
+      jiraProjectKeys: [],
+      sonarProjectKey: null,
+      projectJiraOverrides: [
+        { projectReference: "platform/team/api", jiraProjectKeys: ["DPT", "DPT2"] },
+      ],
+      projectSonarOverrides: [
+        { projectReference: "platform/team/api", sonarProjectKey: "platform-team-api" },
+      ],
+    });
+  });
+
+  it("parses expanded exclusion lines with indented continuations", () => {
+    expect(
+      parseSourceQuery(
+        [
+          "Add Group platform/team",
+          "Without Projects",
+          "\tplatform/team/api,",
+          "\tplatform/team/web",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      kind: "group",
+      reference: "platform/team",
+      exclusions: [
+        { kind: "project", reference: "platform/team/api" },
+        { kind: "project", reference: "platform/team/web" },
+      ],
+      jiraProjectKeys: [],
+      sonarProjectKey: null,
+      projectJiraOverrides: [],
+      projectSonarOverrides: [],
+    });
+  });
+
+  it("formats exclusions into expanded display mode", () => {
+    expect(
+      formatSourceQueryExpanded(
+        [
+          "Add Group platform/team",
+          "Without Groups platform/team/archive, platform/team/legacy",
+          "Without Projects platform/team/api, platform/team/web",
+          "With Project platform/team/api, Jira = OPS, PLAT",
+        ].join("\n"),
+      ),
+    ).toBe(
+      [
+        "Add Group platform/team",
+        "Without Groups",
+        "\tplatform/team/archive,",
+        "\tplatform/team/legacy",
+        "Without Projects",
+        "\tplatform/team/api,",
+        "\tplatform/team/web",
+        "With Project platform/team/api, Jira = OPS, PLAT",
+      ].join("\n"),
+    );
   });
 
   it("parses project-level Jira and SonarQube settings", () => {

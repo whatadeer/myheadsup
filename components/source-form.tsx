@@ -25,19 +25,11 @@ export function SourceForm({ action, runtimeConfig }: SourceFormProps) {
   const [selectedKind, setSelectedKind] = useState<SourceKind | "source">("source");
   const [selectedSource, setSelectedSource] = useState<SourceSuggestion | null>(null);
   const [excludedSources, setExcludedSources] = useState<SourceSuggestion[]>([]);
-  const [sonarProjectKey, setSonarProjectKey] = useState("");
   const [manualSourceQuery, setManualSourceQuery] = useState("");
 
   const builtSourceQuery = useMemo(
-    () =>
-      buildSourceQuery(
-        selectedKind,
-        reference,
-        excludedSources,
-        [],
-        selectedKind === "group" ? null : sonarProjectKey,
-      ),
-    [excludedSources, reference, selectedKind, sonarProjectKey],
+    () => buildSourceQuery(selectedKind, reference, excludedSources, [], null),
+    [excludedSources, reference, selectedKind],
   );
   const sourceQuery = manualSourceQuery || builtSourceQuery;
 
@@ -81,10 +73,6 @@ export function SourceForm({ action, runtimeConfig }: SourceFormProps) {
             if (nextSuggestion?.kind === "project") {
               setExcludedSources([]);
             }
-
-            if (nextSuggestion?.kind === "group") {
-              setSonarProjectKey("");
-            }
           }}
           placeholder="platform/backend, platform/team, or 1234"
           required={false}
@@ -103,24 +91,6 @@ export function SourceForm({ action, runtimeConfig }: SourceFormProps) {
           runtimeConfig={runtimeConfig}
           selected={excludedSources}
         />
-        <div className="field">
-          <label htmlFor="sonarProjectKey">SonarQube project key</label>
-          <input
-            className="input"
-            id="sonarProjectKey"
-            name="sonarProjectKey"
-            onChange={(event) => {
-              setManualSourceQuery("");
-              setSonarProjectKey(event.target.value);
-            }}
-            placeholder="Optional manual SonarQube key"
-            type="text"
-            value={sonarProjectKey}
-          />
-          <span className="field-note">
-            Applied only when the saved source resolves to a project. Group project keys are edited inside the group view.
-          </span>
-        </div>
         <input
           name="excludedSources"
           type="hidden"
@@ -149,7 +119,7 @@ export function SourceForm({ action, runtimeConfig }: SourceFormProps) {
 
       <p className={`form-message ${state.status}`}>
         {state.message ||
-          "Build or paste a saved source query from accessible GitLab groups and projects, then optionally add a SonarQube key for a saved project."}
+          "Build or paste a saved source query from accessible GitLab groups and projects, then add Jira or SonarQube mappings later where needed."}
       </p>
     </form>
   );

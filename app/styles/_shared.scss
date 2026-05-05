@@ -1,0 +1,40 @@
+$ink: #111111;
+$white: #ffffff;
+$surface-soft: #f0f0f0;
+$surface-muted: #f2f2f2;
+$border-soft: #c9c9c9;
+$muted-strong: #444444;
+$danger: #a40000;
+$danger-surface: #f6ded8;
+$warning-surface: #fff7cc;
+$warning-border: #d2b200;
+$warning-text: #7a6300;
+$neutral-text: #555555;
+$transition-fast: 120ms ease;
+$breakpoint-tablet: 860px;
+$breakpoint-mobile: 640px;
+
+@mixin mono-font {
+  font-family: var(--font-geist-mono), "SFMono-Regular", Consolas, "Liberation Mono",
+    Menlo, monospace;
+}
+
+@mixin details-marker-reset {
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@mixin tablet {
+  @media (max-width: $breakpoint-tablet) {
+    @content;
+  }
+}
+
+@mixin mobile {
+  @media (max-width: $breakpoint-mobile) {
+    @content;
+  }
+}

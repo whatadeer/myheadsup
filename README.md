@@ -1,51 +1,72 @@
 # MyHeadsUp
 
-MyHeadsUp is a personal dashboard for a self-hosted GitLab instance. It gives
-you a compact overview of saved groups and projects, including:
+MyHeadsUp is a personal dashboard for self-hosted GitLab. It lets you save the groups and projects you care about, then keeps the useful status in one place: open issues, merge requests, schedules, pipelines, Jira links, and optional SonarQube health.
 
-- open issues
-- open merge requests
-- reviewer status on merge requests
-- pipeline schedules
-- latest pipeline status
-- SonarQube quality and recent trends
+## Highlights
 
-Saved group entries expand into nested subgroup and project views. Project views
-show tabbed detail for issues, merge requests, and schedules, alongside
-pipeline activity and optional SonarQube data.
+- Save top-level GitLab groups or projects and keep them on one dashboard
+- Expand groups into nested subgroup and project views
+- Track open issues and dependency-dashboard vulnerability counts
+- See merge request status, including unassigned, approval, and rebase-needed signals
+- Review latest pipeline status and 14-day pipeline activity
+- Inspect pipeline schedules and trigger upcoming schedules with **Run now**
+- Attach Jira project keys and SonarQube project keys at the source or per-project level
+- Use automatic refresh, manual refresh, and browser-stored fallback config
+- Install the app like a lightweight web app with the included manifest and service worker
 
 ## Configuration
 
-Create `C:\Users\cdroz\Projects\MyHeadsUp\.env.local` with:
+Create a `.env.local` file in the project root:
 
 ```bash
-GITLAB_BASE_URL=https://your.gitlab.example.com
+GITLAB_BASE_URL=https://gitlab.example.com
 GITLAB_TOKEN=your-personal-access-token
+JIRA_BASE_URL=https://jira.example.com
 SONARQUBE_BASE_URL=https://sonarqube.example.com
 SONARQUBE_TOKEN=your-sonarqube-token
 ```
 
-`GITLAB_BASE_URL` should be the root URL of your self-hosted GitLab without
-`/api/v4`.
+### Environment variables
 
-SonarQube is optional. When configured, enter the exact SonarQube project key
-for a saved project, or edit per-project SonarQube keys directly inside a saved
-group view. Those project SonarQube mappings are written into the saved source
-query so they load back with the group.
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `GITLAB_BASE_URL` | Yes | Root URL for your GitLab instance, without `/api/v4` |
+| `GITLAB_TOKEN` | Yes | Personal access token with access to the groups and projects you want to browse |
+| `JIRA_BASE_URL` | No | Enables Jira project links when Jira keys are saved |
+| `SONARQUBE_BASE_URL` | No | Must be paired with `SONARQUBE_TOKEN` |
+| `SONARQUBE_TOKEN` | No | Must be paired with `SONARQUBE_BASE_URL` |
+| `ACCESS_LOGS` | No | Controls request logging; defaults to enabled in production |
+| `DEBUG_DASHBOARD` | No | Enables verbose backend dashboard debug logging |
+| `DEBUG_MODE` | No | Shows a UI panel with effective GitLab, Jira, and SonarQube base URLs |
 
-## Running locally
+### Browser-stored fallback config
+
+If the server starts without GitLab credentials, the home page shows a setup form instead of live data. You can save GitLab settings there and optionally add Jira and SonarQube settings for that browser only.
+
+That fallback is useful for local or self-hosted setups, but server environment variables are still the safer option because browser-stored tokens remain accessible to that browser profile.
+
+## Local development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000).
+
+### Available scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the Next.js dev server |
+| `npm run build` | Build the production app |
+| `npm run start` | Start the production server after a build |
+| `npm run lint` | Run ESLint |
+| `npm run test` | Run the Vitest suite |
 
 ## Running in Docker
 
-The app now ships with a production Dockerfile that uses Next.js standalone
-output.
+The repository includes a production Dockerfile that uses Next.js standalone output.
 
 ```bash
 docker build -t myheadsup .
@@ -55,17 +76,7 @@ docker run --rm -p 3000:3000 \
   myheadsup
 ```
 
-The `data` directory stores your saved dashboard sources, so mount `/app/data`
-to keep them across container restarts.
-
-If you prefer explicit flags, `docker run -e ...` still works. `.env.local`
-stays outside the image build context, so secrets are injected only when the
-container starts.
-
-Production containers log incoming page/API requests and completed outgoing
-GitLab/SonarQube requests by default. Set `ACCESS_LOGS=false` to silence those
-request logs, or `DEBUG_DASHBOARD=true` to add the existing verbose backend
-debug logs as well.
+Saved sources live under `/app/data`, so mount that path if you want them to survive container restarts.
 
 ## Running with Compose
 
@@ -73,64 +84,64 @@ debug logs as well.
 docker compose --env-file .env.local up -d --build
 ```
 
-The checked-in `compose.yaml` includes a development Traefik service, routes
-`http://myheadsup.localhost` to MyHeadsUp, exposes the Traefik dashboard at
-`http://localhost:8080`, and mounts `./data` to `/app/data` so saved sources
-persist locally.
+The checked-in `compose.yaml` starts:
 
-Because the local route uses `.localhost`, you do **not** need to add a hosts
-file entry.
+1. `myheadsup`
+2. `traefik`
 
-## Browser setup fallback
-
-If the app starts without `GITLAB_BASE_URL` and `GITLAB_TOKEN`, the home page
-now shows a setup screen. You can enter the GitLab base URL and token in the
-UI, optionally add SonarQube settings, and those values are saved in your
-browser storage for that browser only.
-
-That browser-stored setup is a fallback for local/self-hosted use. Server
-environment variables remain the preferred option because browser-stored tokens
-are less secure.
+Traefik routes `http://myheadsup.localhost` to the app and exposes its dashboard at `http://localhost:8080`. Because the route uses `.localhost`, you do not need a hosts file entry.
 
 ## Usage
 
-1. Search the accessible GitLab groups and projects from the combined picker, or paste a saved source query directly into the query box.
-2. Pick the root result you want, or enter a full path like `platform/backend` or a numeric GitLab ID.
-3. For group queries, optionally add excluded groups and projects from the exclusion picker.
-4. Optionally enter an exact SonarQube project key for a saved project.
-5. Add the source to the dashboard.
+1. Configure GitLab access with server env vars or browser-stored settings.
+2. Search accessible GitLab groups and projects from the combined picker, or paste a saved source query directly.
+3. Add a root group or project to the dashboard.
+4. For group sources, optionally exclude nested groups or projects.
+5. Optionally attach Jira project keys or SonarQube project keys.
+6. Use **Refresh now** or enable **Auto refresh** to keep the dashboard updated.
 
-The add-source form builds and saves a simple query-language summary such as:
+Saved sources are written to `data\sources.json`, which is ignored by git.
+
+## Saved source query format
+
+The source form can build a query for you, but you can also paste and edit the saved definition directly.
+
+Example:
 
 ```text
 Add Group platform/team
 Without Groups platform/team/archive
 Without Projects platform/team/old-service
+With Jira Project platform/team/api = OPS, PLAT
+With SonarQube Project platform/team/web = platform-team-web
 ```
 
-Excluded groups remove their full subtree from the saved dashboard source.
-
-When you save SonarQube keys for projects inside a group, the saved query grows
-with lines like:
+Project sources can use direct Jira and SonarQube lines:
 
 ```text
-With SonarQube Project platform/team/api = platform-team-api
+Add Project platform/api
+With Jira OPS
+With SonarQube platform-api
 ```
 
-You can also paste an existing saved source query back into the form and the
-app will parse it when adding the source.
+Rules:
 
-The add-source pickers query the GitLab API with your configured token and
-caches recent suggestion results briefly in the app process.
-
-Saved sources are stored locally in `data\sources.json`, which is ignored by
-git.
+- `Add Group ...`, `Add Project ...`, or `Add Source ...` must be the first line
+- `Without Group(s) ...` and `Without Project(s) ...` apply only to saved group sources
+- `With Jira ...` and `With SonarQube ...` apply only to saved project sources
+- `With Jira Project ... = ...` and `With SonarQube Project ... = ...` apply only to saved group sources
 
 ## Refresh behavior
 
-The dashboard performs an initial live load when the page opens.
+The dashboard performs an initial live load when data can be fetched. After that:
 
-Automatic refresh is off by default. Use the control in the top-right corner to
-switch between **Auto refresh** and **Auto refresh off**. Use **Refresh now**
-for a manual reload; the button briefly disables itself after each manual
-refresh.
+- automatic refresh is off by default
+- auto refresh runs every 90 seconds when enabled
+- manual refresh is available on demand with a short cooldown
+- background refresh preserves the last successful data if GitLab has a temporary issue
+
+## Notes
+
+- Jira integration is link-only; MyHeadsUp does not authenticate against Jira
+- SonarQube is optional and ignored when no matching project key is configured
+- The service worker caches the app shell and static assets, but not API responses

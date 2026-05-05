@@ -14,11 +14,19 @@ import { reconcileDashboardsWithSavedSources } from "@/lib/source-dashboard";
 import { sanitizeRuntimeConfig } from "@/lib/runtime-config";
 import { describeRequestError } from "@/lib/request-errors";
 import { labelPipeline, statusTone } from "@/lib/pipeline";
-import type { ActionState, RuntimeConfig, SavedSource, SourceDashboard } from "@/lib/types";
+import type {
+  ActionState,
+  DashboardResponsePayload,
+  DashboardSnapshotSummary,
+  RuntimeConfig,
+  SavedSource,
+  SourceDashboard,
+} from "@/lib/types";
 
 const runtimeConfigStorageKey = "myheadsup.runtime-config";
 const autoRefreshEnabledStorageKey = "myheadsup.auto-refresh-enabled";
 const autoRefreshIntervalMs = 90_000;
+const backgroundRefreshPollIntervalMs = 3_000;
 const manualRefreshCooldownMs = 12_000;
 const startupRetryCount = 3;
 const startupRetryDelayMs = 1_500;
@@ -52,6 +60,7 @@ export function HomeContent({
   const [loadedDashboards, setLoadedDashboards] = useState<SourceDashboard[]>(initialDashboards);
   const [runtimeDashboardError, setRuntimeDashboardError] = useState("");
   const [runtimeDashboardLoading, setRuntimeDashboardLoading] = useState(false);
+  const [backgroundRefreshPending, setBackgroundRefreshPending] = useState(false);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(() =>
     readStoredAutoRefreshEnabled(),
   );
@@ -87,7 +96,7 @@ export function HomeContent({
   };
 
   const loadDashboards = useCallback(
-    async (trigger: "auto" | "initial" | "manual") => {
+    async (trigger: "auto" | "followup" | "initial" | "manual") => {
       if (!canRefreshDashboards || refreshAbortControllerRef.current) {
         return;
       }
@@ -100,6 +109,8 @@ export function HomeContent({
       setRefreshStatusText(
         trigger === "manual"
           ? "Refreshing the dashboard now."
+          : trigger === "followup"
+            ? "Checking for the latest background refresh."
           : trigger === "initial"
             ? "Loading the dashboard with live GitLab data."
             : "Running the scheduled refresh.",
@@ -112,6 +123,7 @@ export function HomeContent({
 
       try {
         let resolvedDashboards: SourceDashboard[] | null = null;
+        let resolvedSnapshotSummary = createEmptyDashboardSnapshotSummary();
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
           try {
@@ -126,8 +138,7 @@ export function HomeContent({
               method: "POST",
               signal: controller.signal,
             });
-            const payload = (await response.json()) as {
-              dashboards?: SourceDashboard[];
+            const payload = (await response.json()) as Partial<DashboardResponsePayload> & {
               message?: string;
             };
 
@@ -136,6 +147,9 @@ export function HomeContent({
             }
 
             resolvedDashboards = payload.dashboards ?? [];
+            const nextSnapshotSummary = payload.snapshot ?? createEmptyDashboardSnapshotSummary();
+            resolvedSnapshotSummary = nextSnapshotSummary;
+            setBackgroundRefreshPending(nextSnapshotSummary.status === "refreshing");
 
             if (!hasVisibleDashboardData) {
               const transientSourceError = getTransientSourceErrorMessage(resolvedDashboards);
@@ -193,13 +207,7 @@ export function HomeContent({
         }
 
         setRuntimeDashboardError("");
-        setRefreshStatusText(
-          trigger === "manual"
-            ? "Dashboard refreshed manually."
-            : trigger === "initial"
-              ? "Live dashboard loaded."
-              : "Automatic refresh complete.",
-        );
+        setRefreshStatusText(buildDashboardRefreshMessage(trigger, resolvedSnapshotSummary));
       } catch (error) {
         if (controller.signal.aborted) {
           return;
@@ -209,6 +217,7 @@ export function HomeContent({
           error,
           "Unable to load the dashboard right now. Check the saved GitLab URL, token, and network access.",
         );
+        setBackgroundRefreshPending(false);
         setRuntimeDashboardError(message);
         setRefreshStatusText(message);
       } finally {
@@ -331,10 +340,38 @@ export function HomeContent({
     runtimeDashboardLoading,
   ]);
 
+  useEffect(() => {
+    if (
+      !isHydrated ||
+      !backgroundRefreshPending ||
+      !canRefreshDashboards ||
+      runtimeDashboardLoading ||
+      !isWindowVisible
+    ) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void loadDashboards("followup");
+    }, backgroundRefreshPollIntervalMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    backgroundRefreshPending,
+    canRefreshDashboards,
+    isHydrated,
+    isWindowVisible,
+    loadDashboards,
+    runtimeDashboardLoading,
+  ]);
+
   function handleSaveRuntimeConfig(nextValue: RuntimeConfig) {
     window.localStorage.setItem(runtimeConfigStorageKey, JSON.stringify(nextValue));
     notifyRuntimeConfigChange();
     initialLoadAttemptedRef.current = false;
+    setBackgroundRefreshPending(false);
     setRuntimeDashboardError("");
     setNextRefreshAt(autoRefreshEnabled ? Date.now() : 0);
     setRefreshStatusText(
@@ -350,6 +387,7 @@ export function HomeContent({
     window.localStorage.removeItem(runtimeConfigStorageKey);
     notifyRuntimeConfigChange();
     setRuntimeDashboardLoading(false);
+    setBackgroundRefreshPending(false);
     setRuntimeDashboardError("");
     setLoadedDashboards([]);
     setNextRefreshAt(0);
@@ -685,6 +723,61 @@ function formatCountdown(valueMs: number) {
   return `${totalSeconds}s`;
 }
 
+function createEmptyDashboardSnapshotSummary(): DashboardSnapshotSummary {
+  return {
+    status: "empty",
+    lastUpdatedAt: null,
+    freshSourceCount: 0,
+    staleSourceCount: 0,
+    refreshingSourceCount: 0,
+    missingSourceCount: 0,
+  };
+}
+
+function buildDashboardRefreshMessage(
+  trigger: "auto" | "followup" | "initial" | "manual",
+  snapshotSummary: DashboardSnapshotSummary,
+) {
+  if (snapshotSummary.status === "refreshing") {
+    if (snapshotSummary.lastUpdatedAt) {
+      return `Showing the last saved snapshot from ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)} while a background refresh runs.`;
+    }
+
+    return "Refreshing the dashboard in the background.";
+  }
+
+  if (snapshotSummary.status === "stale") {
+    if (snapshotSummary.lastUpdatedAt) {
+      return `Showing the last saved snapshot from ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`;
+    }
+
+    return "Showing the last saved snapshot.";
+  }
+
+  if (trigger === "manual") {
+    return "Dashboard refreshed manually.";
+  }
+
+  if (trigger === "followup") {
+    return "Background refresh complete.";
+  }
+
+  if (trigger === "initial") {
+    return "Live dashboard loaded.";
+  }
+
+  return "Automatic refresh complete.";
+}
+
+function formatSnapshotTimestamp(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "the latest successful refresh";
+  }
+
+  return parsed.toLocaleString();
+}
+
 function mergeDashboardsPreservingSuccess(
   currentDashboards: SourceDashboard[],
   nextDashboards: SourceDashboard[],
@@ -802,6 +895,8 @@ function SourceCard({
   onScheduleTriggered: () => void;
   runtimeConfig?: RuntimeConfig | null;
 }) {
+  const [isDefinitionOpen, setIsDefinitionOpen] = useState(false);
+
   if ("error" in dashboard) {
     return (
       <article className="panel source-card">
@@ -810,14 +905,22 @@ function SourceCard({
             <div className="title-row">
               <h2>{dashboard.savedSource.name}</h2>
               <span className="badge">{dashboard.savedSource.kind}</span>
+              {dashboard.savedSource.kind === "group" ? (
+                <DefinitionToggleButton
+                  isOpen={isDefinitionOpen}
+                  onClick={() => setIsDefinitionOpen((open) => !open)}
+                />
+              ) : null}
             </div>
             {dashboard.savedSource.kind === "group" ? (
-              <SourceQueryDisclosure
-                editable
-                label="Group definition"
-                query={dashboard.savedSource.query}
-                sourceId={dashboard.savedSource.id}
-              />
+              isDefinitionOpen ? (
+                <SourceQueryDisclosure
+                  editable
+                  label="Group definition"
+                  query={dashboard.savedSource.query}
+                  sourceId={dashboard.savedSource.id}
+                />
+              ) : null
             ) : (
               <p className="source-query">{dashboard.savedSource.query}</p>
             )}
@@ -910,6 +1013,7 @@ function GroupSourceCard({
   onScheduleTriggered: () => void;
   runtimeConfig?: RuntimeConfig | null;
 }) {
+  const [isDefinitionOpen, setIsDefinitionOpen] = useState(false);
   const { group, savedSource } = dashboard;
 
   return (
@@ -919,13 +1023,19 @@ function GroupSourceCard({
           <div className="title-row">
             <h2>{group.name}</h2>
             <span className="badge">group</span>
+            <DefinitionToggleButton
+              isOpen={isDefinitionOpen}
+              onClick={() => setIsDefinitionOpen((open) => !open)}
+            />
           </div>
-          <SourceQueryDisclosure
-            editable
-            label="Group definition"
-            query={savedSource.query}
-            sourceId={savedSource.id}
-          />
+          {isDefinitionOpen ? (
+            <SourceQueryDisclosure
+              editable
+              label="Group definition"
+              query={savedSource.query}
+              sourceId={savedSource.id}
+            />
+          ) : null}
           <div className="meta-list">
             <span>{group.summary.projectCount} projects tracked</span>
             <span>{group.subgroups.length} nested groups</span>
@@ -957,6 +1067,27 @@ function RemoveSourceButton({ sourceId }: { sourceId: string }) {
         Remove
       </button>
     </form>
+  );
+}
+
+function DefinitionToggleButton({
+  isOpen,
+  onClick,
+}: {
+  isOpen: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-expanded={isOpen}
+      aria-label={isOpen ? "Hide group definition" : "Show group definition"}
+      className={`definition-toggle-button ${isOpen ? "open" : ""}`}
+      onClick={onClick}
+      title={isOpen ? "Hide group definition" : "Show group definition"}
+      type="button"
+    >
+      <span aria-hidden="true">i</span>
+    </button>
   );
 }
 
@@ -999,72 +1130,81 @@ function SourceQueryDisclosure({
   }
 
   return (
-    <details className="source-query-disclosure">
-      <summary className="source-query-summary">{label}</summary>
-      <div className="source-query-body">
-        {isEditing && editable && sourceId ? (
-          <form action={formAction} className="source-query-edit-form">
-            <input name="sourceId" type="hidden" value={sourceId} />
-            <textarea
-              className="input source-query-preview"
-              name="sourceQueryDefinition"
-              onChange={(event) => setDraftQuery(event.target.value)}
-              rows={Math.max(draftQuery.split("\n").length || 1, 3)}
-              spellCheck={false}
-              value={draftQuery}
-            />
-            <div className="source-query-actions">
-              <div className="source-query-actions-main">
-                <button className="subtle-action-button" disabled={pending} type="submit">
-                  {pending ? "Saving..." : "Save"}
-                </button>
-                <button
-                  className="subtle-action-button"
-                  disabled={pending}
-                  onClick={() => {
-                    setDraftQuery(query);
-                    setIsEditing(false);
-                  }}
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-              {state.message ? (
-                <span className={`form-message ${state.status}`}>{state.message}</span>
-              ) : null}
-            </div>
-          </form>
-        ) : (
-          <>
-            <p className="source-query">{query}</p>
-            <div className="source-query-actions">
-              <div className="source-query-actions-main">
-                <button className="subtle-action-button" onClick={handleCopy} type="button">
-                  Copy
-                </button>
-                {editable && sourceId ? (
-                  <button
-                    className="subtle-action-button"
-                    onClick={() => {
-                      setDraftQuery(query);
-                      setIsEditing(true);
-                    }}
-                    type="button"
-                  >
-                    Edit
-                  </button>
-                ) : null}
-              </div>
-              {copyState !== "idle" ? (
-                <span className={`form-message ${copyState === "error" ? "error" : "success"}`}>
-                  {copyState === "copied" ? "Copied" : "Copy failed"}
-                </span>
-              ) : null}
-            </div>
-          </>
-        )}
+    <section className="source-query-disclosure">
+      <div className="source-query-card-header">
+        <div className="source-query-heading-stack">
+          <span className="source-query-heading">{label}</span>
+          <span className="source-query-caption">
+            {editable && sourceId
+              ? "Copy or edit the saved definition that controls this group."
+              : "Saved definition"}
+          </span>
+        </div>
+        {!isEditing ? (
+          <div className="source-query-actions-main source-query-heading-actions">
+            <button className="subtle-action-button" onClick={handleCopy} type="button">
+              <span aria-hidden="true">Copy</span>
+              <span className="sr-only"> group definition</span>
+            </button>
+            {editable && sourceId ? (
+              <button
+                className="subtle-action-button"
+                onClick={() => {
+                  setDraftQuery(query);
+                  setIsEditing(true);
+                }}
+                type="button"
+              >
+                <span aria-hidden="true">Edit</span>
+                <span className="sr-only"> group definition</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-    </details>
+      {isEditing && editable && sourceId ? (
+        <form action={formAction} className="source-query-edit-form">
+          <input name="sourceId" type="hidden" value={sourceId} />
+          <textarea
+            className="input source-query-preview source-query-editor"
+            name="sourceQueryDefinition"
+            onChange={(event) => setDraftQuery(event.target.value)}
+            rows={Math.max(draftQuery.split("\n").length + 1, 6)}
+            spellCheck={false}
+            value={draftQuery}
+          />
+          <div className="source-query-actions">
+            <div className="source-query-actions-main">
+              <button className="subtle-action-button" disabled={pending} type="submit">
+                {pending ? "Saving..." : "Save"}
+              </button>
+              <button
+                className="subtle-action-button"
+                disabled={pending}
+                onClick={() => {
+                  setDraftQuery(query);
+                  setIsEditing(false);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+            {state.message ? <span className={`form-message ${state.status}`}>{state.message}</span> : null}
+          </div>
+        </form>
+      ) : (
+        <>
+          <div className="source-query-body">
+            <p className="source-query source-query-surface">{query}</p>
+          </div>
+          {copyState !== "idle" ? (
+            <span className={`form-message ${copyState === "error" ? "error" : "success"}`}>
+              {copyState === "copied" ? "Copied" : "Copy failed"}
+            </span>
+          ) : null}
+        </>
+      )}
+    </section>
   );
 }

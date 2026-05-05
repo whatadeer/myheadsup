@@ -168,24 +168,6 @@ export function GroupTreeFilter({
         />
       </div>
 
-      <NextScheduledRuns
-        group={group}
-        onScheduleTriggered={onScheduleTriggered}
-        runtimeConfig={runtimeConfig}
-      />
-
-      <div className="summary-stack">
-        <PipelineHistogram
-          buckets={group.summary.pipelineActivity}
-          label="Pipeline activity (14 days)"
-          onClearSelection={() => setSelectedDate(null)}
-          onSelectDate={(date) =>
-            setSelectedDate((currentDate) => (currentDate === date ? null : date))
-          }
-          selectedDate={selectedDate}
-        />
-      </div>
-
       <div className="summary-stack">
         <h3 className="section-heading">Primary language</h3>
         <div className="status-list">
@@ -239,6 +221,24 @@ export function GroupTreeFilter({
           ))}
         </div>
       </div>
+
+      <div className="summary-stack">
+        <PipelineHistogram
+          buckets={group.summary.pipelineActivity}
+          label="Pipeline activity (14 days)"
+          onClearSelection={() => setSelectedDate(null)}
+          onSelectDate={(date) =>
+            setSelectedDate((currentDate) => (currentDate === date ? null : date))
+          }
+          selectedDate={selectedDate}
+        />
+      </div>
+
+      <NextScheduledRuns
+        group={group}
+        onScheduleTriggered={onScheduleTriggered}
+        runtimeConfig={runtimeConfig}
+      />
 
       <div className="group-tree">
         {visibleGroup.projects.length ? (

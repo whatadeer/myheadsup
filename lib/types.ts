@@ -202,3 +202,19 @@ export type SourceDashboard =
       savedSource: SavedSource;
       error: string;
     };
+
+export type DashboardSnapshotStatus = "empty" | "fresh" | "stale" | "refreshing";
+
+export type DashboardSnapshotSummary = {
+  status: DashboardSnapshotStatus;
+  lastUpdatedAt: string | null;
+  freshSourceCount: number;
+  staleSourceCount: number;
+  refreshingSourceCount: number;
+  missingSourceCount: number;
+};
+
+export type DashboardResponsePayload = {
+  dashboards: SourceDashboard[];
+  snapshot: DashboardSnapshotSummary;
+};

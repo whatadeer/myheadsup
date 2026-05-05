@@ -1,7 +1,7 @@
 import { createConcurrencyLimiter } from "./concurrency-limit";
 import { describeRequestError } from "./request-errors";
 import { preferRuntimeValue } from "./runtime-config";
-import { logServerError } from "./server-log";
+import { logServerError, logServerExternalRequest } from "./server-log";
 import type { RuntimeConfig, SonarMetricHistoryPoint, SonarProjectSummary } from "./types";
 
 type SonarQualityGateResponse = {
@@ -154,6 +154,12 @@ async function fetchSonarQube<T>(
     );
   }
 
+  logServerExternalRequest("sonarqube-request", {
+    baseUrl,
+    method: "GET",
+    path,
+    status: response.status,
+  });
   if (response.ok) {
     return (await response.json()) as T;
   }

@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { resolveSourceSelection } from "@/lib/gitlab";
+import { runWithRequestContext } from "@/lib/request-context";
 import { parseRuntimeConfigString } from "@/lib/runtime-config";
 import { parseSourceQuery } from "@/lib/source-query";
 import {
@@ -26,106 +28,108 @@ export async function addSourceAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const sourceQueryDefinition = formData.get("sourceQueryDefinition");
+  return withRequestContext(async () => {
+    const sourceQueryDefinition = formData.get("sourceQueryDefinition");
 
-  if (typeof sourceQueryDefinition !== "string" || !sourceQueryDefinition.trim()) {
-    return {
-      status: "error",
-      message: "Enter a saved source query or a full GitLab path.",
-    };
-  }
-
-  try {
-    const runtimeConfig = parseRuntimeConfigString(formData.get("runtimeConfig"));
-    const parsedQuery = parseSourceQuery(sourceQueryDefinition);
-    const [resolved, exclusions, projectJiraOverrides, projectSonarOverrides] = await Promise.all([
-      resolveSourceSelection(
-        parsedQuery.reference,
-        parsedQuery.reference,
-        parsedQuery.kind === "source" ? undefined : parsedQuery.kind,
-        runtimeConfig,
-      ),
-      resolveExcludedSourceReferences(parsedQuery.exclusions, runtimeConfig),
-      resolveProjectJiraOverrides(parsedQuery.projectJiraOverrides, runtimeConfig),
-      resolveProjectSonarOverrides(parsedQuery.projectSonarOverrides, runtimeConfig),
-    ]);
-
-    if (resolved.kind === "project" && exclusions.length) {
+    if (typeof sourceQueryDefinition !== "string" || !sourceQueryDefinition.trim()) {
       return {
         status: "error",
-        message: "Only saved groups can exclude nested groups or projects.",
+        message: "Enter a saved source query or a full GitLab path.",
       };
     }
 
-    if (resolved.kind === "group" && parsedQuery.sonarProjectKey) {
+    try {
+      const runtimeConfig = parseRuntimeConfigString(formData.get("runtimeConfig"));
+      const parsedQuery = parseSourceQuery(sourceQueryDefinition);
+      const [resolved, exclusions, projectJiraOverrides, projectSonarOverrides] = await Promise.all([
+        resolveSourceSelection(
+          parsedQuery.reference,
+          parsedQuery.reference,
+          parsedQuery.kind === "source" ? undefined : parsedQuery.kind,
+          runtimeConfig,
+        ),
+        resolveExcludedSourceReferences(parsedQuery.exclusions, runtimeConfig),
+        resolveProjectJiraOverrides(parsedQuery.projectJiraOverrides, runtimeConfig),
+        resolveProjectSonarOverrides(parsedQuery.projectSonarOverrides, runtimeConfig),
+      ]);
+
+      if (resolved.kind === "project" && exclusions.length) {
+        return {
+          status: "error",
+          message: "Only saved groups can exclude nested groups or projects.",
+        };
+      }
+
+      if (resolved.kind === "group" && parsedQuery.sonarProjectKey) {
+        return {
+          status: "error",
+          message: 'Only saved projects can use "With SonarQube ...".',
+        };
+      }
+
+      if (resolved.kind === "group" && parsedQuery.jiraProjectKeys.length) {
+        return {
+          status: "error",
+          message: 'Only saved projects can use "With Jira ...".',
+        };
+      }
+
+      if (resolved.kind === "project" && projectSonarOverrides.length) {
+        return {
+          status: "error",
+          message: 'Only saved groups can use "With SonarQube Project ... = ...".',
+        };
+      }
+
+      if (resolved.kind === "project" && projectJiraOverrides.length) {
+        return {
+          status: "error",
+          message: 'Only saved groups can use "With Jira Project ... = ...".',
+        };
+      }
+
+      if (
+        exclusions.some(
+          (source) => source.kind === resolved.kind && source.gitlabId === resolved.gitlabId,
+        )
+      ) {
+        return {
+          status: "error",
+          message: "The saved source query cannot exclude the root group or project itself.",
+        };
+      }
+
+      const result = await addSource({
+        exclusions,
+        gitlabId: resolved.gitlabId,
+        jiraProjectKeys: resolved.kind === "project" ? parsedQuery.jiraProjectKeys : [],
+        kind: resolved.kind,
+        name: resolved.name,
+        projectJiraOverrides,
+        projectSonarOverrides,
+        reference: resolved.reference,
+        sonarProjectKey: resolved.kind === "project" ? parsedQuery.sonarProjectKey : null,
+        webUrl: resolved.webUrl,
+      });
+
+      revalidatePath("/");
+
+      return {
+        status: "success",
+        message:
+          result === "created"
+            ? `Added ${resolved.name}.`
+            : result === "updated"
+              ? `Updated ${resolved.name}.`
+            : `${resolved.name} is already saved.`,
+      };
+    } catch (error) {
       return {
         status: "error",
-        message: 'Only saved projects can use "With SonarQube ...".',
+        message: error instanceof Error ? error.message : "Unable to add that source.",
       };
     }
-
-    if (resolved.kind === "group" && parsedQuery.jiraProjectKeys.length) {
-      return {
-        status: "error",
-        message: 'Only saved projects can use "With Jira ...".',
-      };
-    }
-
-    if (resolved.kind === "project" && projectSonarOverrides.length) {
-      return {
-        status: "error",
-        message: 'Only saved groups can use "With SonarQube Project ... = ...".',
-      };
-    }
-
-    if (resolved.kind === "project" && projectJiraOverrides.length) {
-      return {
-        status: "error",
-        message: 'Only saved groups can use "With Jira Project ... = ...".',
-      };
-    }
-
-    if (
-      exclusions.some(
-        (source) => source.kind === resolved.kind && source.gitlabId === resolved.gitlabId,
-      )
-    ) {
-      return {
-        status: "error",
-        message: "The saved source query cannot exclude the root group or project itself.",
-      };
-    }
-
-    const result = await addSource({
-      exclusions,
-      gitlabId: resolved.gitlabId,
-      jiraProjectKeys: resolved.kind === "project" ? parsedQuery.jiraProjectKeys : [],
-      kind: resolved.kind,
-      name: resolved.name,
-      projectJiraOverrides,
-      projectSonarOverrides,
-      reference: resolved.reference,
-      sonarProjectKey: resolved.kind === "project" ? parsedQuery.sonarProjectKey : null,
-      webUrl: resolved.webUrl,
-    });
-
-    revalidatePath("/");
-
-    return {
-      status: "success",
-      message:
-        result === "created"
-          ? `Added ${resolved.name}.`
-          : result === "updated"
-            ? `Updated ${resolved.name}.`
-          : `${resolved.name} is already saved.`,
-    };
-  } catch (error) {
-    return {
-      status: "error",
-      message: error instanceof Error ? error.message : "Unable to add that source.",
-    };
-  }
+  });
 }
 
 export async function removeSourceAction(formData: FormData) {
@@ -349,115 +353,121 @@ export async function updateGroupDefinitionAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const sourceId = formData.get("sourceId");
-  const sourceQueryDefinition = formData.get("sourceQueryDefinition");
+  return withRequestContext(async () => {
+    const sourceId = formData.get("sourceId");
+    const sourceQueryDefinition = formData.get("sourceQueryDefinition");
 
-  if (typeof sourceId !== "string" || !sourceId) {
-    return {
-      status: "error",
-      message: "That saved source no longer exists.",
-    };
-  }
-
-  if (typeof sourceQueryDefinition !== "string" || !sourceQueryDefinition.trim()) {
-    return {
-      status: "error",
-      message: "Enter a saved group definition.",
-    };
-  }
-
-  try {
-    const existingSource = (await readSources()).find((source) => source.id === sourceId);
-
-    if (!existingSource) {
+    if (typeof sourceId !== "string" || !sourceId) {
       return {
         status: "error",
         message: "That saved source no longer exists.",
       };
     }
 
-    if (existingSource.kind !== "group") {
+    if (typeof sourceQueryDefinition !== "string" || !sourceQueryDefinition.trim()) {
       return {
         status: "error",
-        message: "Only saved groups support inline group definition edits.",
+        message: "Enter a saved group definition.",
       };
     }
 
-    const parsedQuery = parseSourceQuery(sourceQueryDefinition);
-    const [resolved, exclusions, projectJiraOverrides, projectSonarOverrides] = await Promise.all([
-      resolveSourceSelection(
-        parsedQuery.reference,
-        parsedQuery.reference,
-        parsedQuery.kind === "source" ? undefined : parsedQuery.kind,
-      ),
-      resolveExcludedSourceReferences(parsedQuery.exclusions),
-      resolveProjectJiraOverrides(parsedQuery.projectJiraOverrides),
-      resolveProjectSonarOverrides(parsedQuery.projectSonarOverrides),
-    ]);
+    try {
+      const existingSource = (await readSources()).find((source) => source.id === sourceId);
 
-    if (resolved.kind !== "group") {
+      if (!existingSource) {
+        return {
+          status: "error",
+          message: "That saved source no longer exists.",
+        };
+      }
+
+      if (existingSource.kind !== "group") {
+        return {
+          status: "error",
+          message: "Only saved groups support inline group definition edits.",
+        };
+      }
+
+      const parsedQuery = parseSourceQuery(sourceQueryDefinition);
+      const [resolved, exclusions, projectJiraOverrides, projectSonarOverrides] = await Promise.all([
+        resolveSourceSelection(
+          parsedQuery.reference,
+          parsedQuery.reference,
+          parsedQuery.kind === "source" ? undefined : parsedQuery.kind,
+        ),
+        resolveExcludedSourceReferences(parsedQuery.exclusions),
+        resolveProjectJiraOverrides(parsedQuery.projectJiraOverrides),
+        resolveProjectSonarOverrides(parsedQuery.projectSonarOverrides),
+      ]);
+
+      if (resolved.kind !== "group") {
+        return {
+          status: "error",
+          message: 'Group definitions must start with "Add Group ...".',
+        };
+      }
+
+      if (resolved.gitlabId !== existingSource.gitlabId) {
+        return {
+          status: "error",
+          message: "Inline edits can refine this saved group, but cannot switch it to a different root group.",
+        };
+      }
+
+      if (parsedQuery.sonarProjectKey) {
+        return {
+          status: "error",
+          message: 'Saved groups cannot use "With SonarQube ...".',
+        };
+      }
+
+      if (parsedQuery.jiraProjectKeys.length) {
+        return {
+          status: "error",
+          message: 'Saved groups cannot use "With Jira ...".',
+        };
+      }
+
+      if (
+        exclusions.some(
+          (source) => source.kind === resolved.kind && source.gitlabId === resolved.gitlabId,
+        )
+      ) {
+        return {
+          status: "error",
+          message: "The saved source query cannot exclude the root group itself.",
+        };
+      }
+
+      await updateSourceDefinition(sourceId, {
+        exclusions,
+        gitlabId: resolved.gitlabId,
+        jiraProjectKeys: [],
+        kind: "group",
+        name: resolved.name,
+        projectJiraOverrides,
+        projectSonarOverrides,
+        reference: resolved.reference,
+        sonarProjectKey: null,
+        webUrl: resolved.webUrl,
+      });
+      revalidatePath("/");
+
+      return {
+        status: "success",
+        message: "Saved the group definition.",
+      };
+    } catch (error) {
       return {
         status: "error",
-        message: 'Group definitions must start with "Add Group ...".',
+        message: error instanceof Error ? error.message : "Unable to update that group definition.",
       };
     }
+  });
+}
 
-    if (resolved.gitlabId !== existingSource.gitlabId) {
-      return {
-        status: "error",
-        message: "Inline edits can refine this saved group, but cannot switch it to a different root group.",
-      };
-    }
-
-    if (parsedQuery.sonarProjectKey) {
-      return {
-        status: "error",
-        message: 'Saved groups cannot use "With SonarQube ...".',
-      };
-    }
-
-    if (parsedQuery.jiraProjectKeys.length) {
-      return {
-        status: "error",
-        message: 'Saved groups cannot use "With Jira ...".',
-      };
-    }
-
-    if (
-      exclusions.some(
-        (source) => source.kind === resolved.kind && source.gitlabId === resolved.gitlabId,
-      )
-    ) {
-      return {
-        status: "error",
-        message: "The saved source query cannot exclude the root group itself.",
-      };
-    }
-
-    await updateSourceDefinition(sourceId, {
-      exclusions,
-      gitlabId: resolved.gitlabId,
-      jiraProjectKeys: [],
-      kind: "group",
-      name: resolved.name,
-      projectJiraOverrides,
-      projectSonarOverrides,
-      reference: resolved.reference,
-      sonarProjectKey: null,
-      webUrl: resolved.webUrl,
-    });
-    revalidatePath("/");
-
-    return {
-      status: "success",
-      message: "Saved the group definition.",
-    };
-  } catch (error) {
-    return {
-      status: "error",
-      message: error instanceof Error ? error.message : "Unable to update that group definition.",
-    };
-  }
+async function withRequestContext<T>(action: () => Promise<T>) {
+  return runWithRequestContext(await headers(), action);
 }
 
 async function resolveExcludedSourceReferences(

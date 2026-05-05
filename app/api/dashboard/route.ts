@@ -7,6 +7,7 @@ import {
 } from "@/lib/dashboard-snapshot";
 import { readDashboardSnapshotEntries, writeDashboardSnapshot } from "@/lib/dashboard-snapshot-store";
 import { getGitLabConfigError } from "@/lib/gitlab";
+import { runWithRequestContext } from "@/lib/request-context";
 import { parseRuntimeConfigValue } from "@/lib/runtime-config";
 import { resolveJiraBaseUrl } from "@/lib/server-jira";
 import { logServerDebug, logServerError } from "@/lib/server-log";
@@ -46,46 +47,48 @@ type SourceDashboardResult = {
 };
 
 export async function POST(request: Request) {
-  try {
-    const payload = (await request.json()) as {
-      force?: boolean;
-      runtimeConfig?: unknown;
-    };
-    const force = payload.force === true;
-    const runtimeConfig = parseRuntimeConfigValue(payload.runtimeConfig);
-    const configError = getGitLabConfigError(runtimeConfig);
+  return runWithRequestContext(request.headers, async () => {
+    try {
+      const payload = (await request.json()) as {
+        force?: boolean;
+        runtimeConfig?: unknown;
+      };
+      const force = payload.force === true;
+      const runtimeConfig = parseRuntimeConfigValue(payload.runtimeConfig);
+      const configError = getGitLabConfigError(runtimeConfig);
 
-    if (configError) {
-      logServerError("api-dashboard", new Error(configError), {
-        hasRuntimeConfig: Boolean(runtimeConfig),
-      });
-      return NextResponse.json({ message: configError }, { status: 400 });
+      if (configError) {
+        logServerError("api-dashboard", new Error(configError), {
+          hasRuntimeConfig: Boolean(runtimeConfig),
+        });
+        return NextResponse.json({ message: configError }, { status: 400 });
+      }
+
+      const savedSources = await readSources();
+      const snapshots = await readDashboardSnapshotEntries();
+      const dashboards = await Promise.all(
+        savedSources.map((savedSource) =>
+          loadSourceDashboard(savedSource, snapshots[buildSourceDashboardCacheKey(savedSource, runtimeConfig)] ?? null, runtimeConfig, force),
+        ),
+      );
+
+      const response: DashboardResponsePayload = {
+        dashboards: dashboards.map((entry) => entry.dashboard),
+        snapshot: summarizeDashboardSnapshots(dashboards),
+      };
+
+      return NextResponse.json(response);
+    } catch (error) {
+      logServerError("api-dashboard", error);
+      return NextResponse.json(
+        {
+          message:
+            error instanceof Error ? error.message : "Unable to load saved source dashboards.",
+        },
+        { status: 500 },
+      );
     }
-
-    const savedSources = await readSources();
-    const snapshots = await readDashboardSnapshotEntries();
-    const dashboards = await Promise.all(
-      savedSources.map((savedSource) =>
-        loadSourceDashboard(savedSource, snapshots[buildSourceDashboardCacheKey(savedSource, runtimeConfig)] ?? null, runtimeConfig, force),
-      ),
-    );
-
-    const response: DashboardResponsePayload = {
-      dashboards: dashboards.map((entry) => entry.dashboard),
-      snapshot: summarizeDashboardSnapshots(dashboards),
-    };
-
-    return NextResponse.json(response);
-  } catch (error) {
-    logServerError("api-dashboard", error);
-    return NextResponse.json(
-      {
-        message:
-          error instanceof Error ? error.message : "Unable to load saved source dashboards.",
-      },
-      { status: 500 },
-    );
-  }
+  });
 }
 
 async function loadSourceDashboard(

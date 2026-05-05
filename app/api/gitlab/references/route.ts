@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGitLabConfigError, searchSourceSuggestions } from "@/lib/gitlab";
+import { runWithRequestContext } from "@/lib/request-context";
 import { parseRuntimeConfigValue } from "@/lib/runtime-config";
 import { logServerDebug, logServerError } from "@/lib/server-log";
 import type { SourceKind } from "@/lib/types";
@@ -7,30 +8,34 @@ import type { SourceKind } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  return handleLookup({
-    kind: searchParams.get("kind"),
-    query: searchParams.get("q") ?? "",
+  return runWithRequestContext(request.headers, async () => {
+    const { searchParams } = new URL(request.url);
+    return handleLookup({
+      kind: searchParams.get("kind"),
+      query: searchParams.get("q") ?? "",
+    });
   });
 }
 
 export async function POST(request: Request) {
-  try {
-    const payload = (await request.json()) as {
-      kind?: string | null;
-      q?: string;
-      runtimeConfig?: unknown;
-    };
+  return runWithRequestContext(request.headers, async () => {
+    try {
+      const payload = (await request.json()) as {
+        kind?: string | null;
+        q?: string;
+        runtimeConfig?: unknown;
+      };
 
-    return handleLookup({
-      kind: payload.kind ?? null,
-      query: payload.q ?? "",
-      runtimeConfig: parseRuntimeConfigValue(payload.runtimeConfig),
-    });
-  } catch (error) {
-    logServerError("api-gitlab-references", error);
-    return NextResponse.json({ message: "Invalid request body." }, { status: 400 });
-  }
+      return handleLookup({
+        kind: payload.kind ?? null,
+        query: payload.q ?? "",
+        runtimeConfig: parseRuntimeConfigValue(payload.runtimeConfig),
+      });
+    } catch (error) {
+      logServerError("api-gitlab-references", error);
+      return NextResponse.json({ message: "Invalid request body." }, { status: 400 });
+    }
+  });
 }
 
 async function handleLookup({

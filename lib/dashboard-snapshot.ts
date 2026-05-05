@@ -1,6 +1,6 @@
 import type { DashboardSnapshotSummary } from "./types";
 
-export const sourceDashboardSnapshotTtlMs = 30 * 60 * 1000;
+export const sourceDashboardSnapshotTtlMs = 60 * 60 * 1000;
 
 type DashboardSnapshotSummaryEntry = {
   fetchedAt: string | null;

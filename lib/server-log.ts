@@ -1,11 +1,13 @@
+import { getCurrentRequestId } from "./request-context";
+
 type LogContext = Record<string, unknown>;
 
-const debugDashboardLoggingEnabled = process.env.DEBUG_DASHBOARD === "true";
-
 export function logServerError(scope: string, error: unknown, context?: LogContext) {
+  const requestContext = getRequestLogContext();
   console.error(
     formatLogPrefix(scope, "error"),
     JSON.stringify({
+      ...(requestContext ?? {}),
       ...(context ?? {}),
       error: serializeError(error),
     }),
@@ -13,21 +15,114 @@ export function logServerError(scope: string, error: unknown, context?: LogConte
 }
 
 export function logServerDebug(scope: string, message: string, context?: LogContext) {
-  if (!debugDashboardLoggingEnabled) {
+  if (!isDebugDashboardLoggingEnabled()) {
     return;
   }
 
+  writeInfoLog(scope, "debug", message, context);
+}
+
+export function logServerInfo(scope: string, message: string, context?: LogContext) {
+  writeInfoLog(scope, "info", message, context);
+}
+
+function writeInfoLog(
+  scope: string,
+  level: "debug" | "info",
+  message: string,
+  context?: LogContext,
+) {
+  const requestContext = getRequestLogContext();
   console.info(
-    formatLogPrefix(scope, "debug"),
+    formatLogPrefix(scope, level),
     JSON.stringify({
       message,
+      ...(requestContext ?? {}),
       ...(context ?? {}),
     }),
   );
 }
 
-function formatLogPrefix(scope: string, level: "debug" | "error") {
+export function logServerRequest(
+  scope: string,
+  request: {
+    method: string;
+    requestId: string;
+    nextUrl: {
+      pathname: string;
+      search: string;
+    };
+  },
+) {
+  if (!isAccessLoggingEnabled()) {
+    return;
+  }
+
+  logServerInfo(scope, "Incoming request", {
+    hasSearch: request.nextUrl.search.length > 0,
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    requestId: request.requestId,
+  });
+}
+
+export function logServerExternalRequest(
+  scope: string,
+  request: {
+    baseUrl: string;
+    method: string;
+    path: string;
+    status: number;
+  },
+) {
+  if (!isAccessLoggingEnabled()) {
+    return;
+  }
+
+  logServerInfo(scope, "Outgoing request completed", request);
+}
+
+function formatLogPrefix(scope: string, level: "debug" | "error" | "info") {
   return `[myheadsup:${scope}:${level}]`;
+}
+
+function isAccessLoggingEnabled() {
+  const accessLogs = normalizeBooleanEnv(process.env.ACCESS_LOGS);
+  if (accessLogs !== null) {
+    return accessLogs;
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
+function isDebugDashboardLoggingEnabled() {
+  return normalizeBooleanEnv(process.env.DEBUG_DASHBOARD) === true;
+}
+
+function normalizeBooleanEnv(value: string | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+  if (normalizedValue === "true") {
+    return true;
+  }
+
+  if (normalizedValue === "false") {
+    return false;
+  }
+
+  return null;
+}
+
+function getRequestLogContext() {
+  const requestId = getCurrentRequestId();
+  if (!requestId) {
+    return null;
+  }
+
+  return { requestId };
 }
 
 function serializeError(error: unknown) {

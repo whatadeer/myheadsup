@@ -62,6 +62,11 @@ If you prefer explicit flags, `docker run -e ...` still works. `.env.local`
 stays outside the image build context, so secrets are injected only when the
 container starts.
 
+Production containers log incoming page/API requests and completed outgoing
+GitLab/SonarQube requests by default. Set `ACCESS_LOGS=false` to silence those
+request logs, or `DEBUG_DASHBOARD=true` to add the existing verbose backend
+debug logs as well.
+
 ## Running with Compose
 
 ```bash

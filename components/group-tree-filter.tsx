@@ -11,13 +11,13 @@ import {
 import { DependencyVulnerabilityPanel } from "@/components/dependency-vulnerability-panel";
 import { JiraProjectLinks } from "@/components/jira-project-links";
 import { GroupQueryExcludeForm } from "@/components/group-query-exclude-form";
+import { ProjectDetailTabs } from "@/components/project-detail-tabs";
 import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
 import { ProjectQueryExcludeForm } from "@/components/project-query-exclude-form";
 import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
-import { formatMergeRequestMeta } from "@/lib/merge-request-meta";
 import { formatProjectLanguages, labelPrimaryLanguage } from "@/lib/project-languages";
 import { labelPipeline, pipelineStatusEntries, projectPipelineStatus, statusTone } from "@/lib/pipeline";
 import type { GroupNode, ProjectSummary, RuntimeConfig } from "@/lib/types";
@@ -445,14 +445,6 @@ function ProjectRow({
   selectedDate: string | null;
   sourceId: string;
 }) {
-  const [selectedTab, setSelectedTab] = useState<"issues" | "merge-requests" | "schedules">(
-    project.openMergeRequests
-      ? "merge-requests"
-      : project.schedules.upcoming.length
-        ? "schedules"
-        : "issues",
-  );
-
   return (
     <article className="project-row" id={`project-row-${project.id}`}>
       <div className="project-row-content">
@@ -510,59 +502,12 @@ function ProjectRow({
           {project.dependencyVulnerabilities ? (
             <DependencyVulnerabilityPanel summary={project.dependencyVulnerabilities} />
           ) : null}
-          <div className="summary-stack project-tab-shell">
-            <div className="section-heading-row">
-              <span className="section-heading">Detail tabs</span>
-              <span className="helper-text">Choose issues, merge requests, or schedules.</span>
-            </div>
-          <div
-            aria-label={`Detail tabs for ${project.name}`}
-            className="project-tab-list"
-            role="tablist"
-          >
-            <button
-              aria-controls={`project-row-panel-${project.id}-issues`}
-              aria-selected={selectedTab === "issues"}
-              className={`project-tab${selectedTab === "issues" ? " active" : ""}`}
-              id={`project-row-tab-${project.id}-issues`}
-              onClick={() => setSelectedTab("issues")}
-              role="tab"
-              type="button"
-            >
-              {project.openIssues} issues
-            </button>
-            <button
-              aria-controls={`project-row-panel-${project.id}-merge-requests`}
-              aria-selected={selectedTab === "merge-requests"}
-              className={`project-tab${selectedTab === "merge-requests" ? " active" : ""}`}
-              id={`project-row-tab-${project.id}-merge-requests`}
-              onClick={() => setSelectedTab("merge-requests")}
-              role="tab"
-              type="button"
-            >
-              {project.openMergeRequests} MRs
-            </button>
-            {project.unassignedMergeRequests ? (
-              <span className="project-tab-meta">{project.unassignedMergeRequests} unassigned</span>
-            ) : null}
-            <button
-              aria-controls={`project-row-panel-${project.id}-schedules`}
-              aria-selected={selectedTab === "schedules"}
-              className={`project-tab${selectedTab === "schedules" ? " active" : ""}`}
-              id={`project-row-tab-${project.id}-schedules`}
-              onClick={() => setSelectedTab("schedules")}
-              role="tab"
-              type="button"
-            >
-              {project.schedules.total} schedules
-            </button>
-          </div>
-          </div>
-          <ProjectTabPanel
+          <ProjectDetailTabs
+            idPrefix={`project-row-${project.id}`}
             onScheduleTriggered={onScheduleTriggered}
             project={project}
             runtimeConfig={runtimeConfig}
-            selectedTab={selectedTab}
+            variant="embedded"
           />
         </div>
       </div>
@@ -602,126 +547,6 @@ function ProjectRow({
         ) : null}
       </div>
     </article>
-  );
-}
-
-function ProjectTabPanel({
-  onScheduleTriggered,
-  project,
-  runtimeConfig,
-  selectedTab,
-}: {
-  onScheduleTriggered?: () => void;
-  project: ProjectSummary;
-  runtimeConfig?: RuntimeConfig | null;
-  selectedTab: "issues" | "merge-requests" | "schedules";
-}) {
-  if (selectedTab === "issues") {
-    return (
-      <div
-        aria-labelledby={`project-row-tab-${project.id}-issues`}
-        className="summary-stack"
-        id={`project-row-panel-${project.id}-issues`}
-        role="tabpanel"
-      >
-        <h3 className="section-heading">Open issues</h3>
-        {project.issues.length ? (
-          <div className="merge-request-list">
-            {project.issues.map((issue) => (
-              <a
-                className="merge-request-link"
-                href={issue.webUrl}
-                key={issue.id}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <span className="merge-request-title">#{issue.iid} {issue.title}</span>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <p className="helper-text">No open issues right now.</p>
-        )}
-        <a className="text-button" href={issuesUrl(project.webUrl)} rel="noreferrer" target="_blank">
-          Open issues in GitLab
-        </a>
-      </div>
-    );
-  }
-
-  if (selectedTab === "schedules") {
-    return (
-      <div
-        aria-labelledby={`project-row-tab-${project.id}-schedules`}
-        className="summary-stack"
-        id={`project-row-panel-${project.id}-schedules`}
-        role="tabpanel"
-      >
-        <h3 className="section-heading">Upcoming schedules</h3>
-        {project.schedules.upcoming.length ? (
-          <div className="schedule-list">
-            {project.schedules.upcoming.map((schedule) => (
-              <div className="schedule-item" key={schedule.id}>
-                <span className="schedule-item-title">
-                  {schedule.description || schedule.ref || `Schedule ${schedule.id}`}
-                </span>
-                <span className="schedule-item-detail">
-                  {formatScheduleDate(schedule.nextRunAt)}
-                  {schedule.ref ? ` - ${schedule.ref}` : ""}
-                </span>
-                <ScheduleRunButton
-                  onTriggered={onScheduleTriggered}
-                  projectId={project.id}
-                  runtimeConfig={runtimeConfig}
-                  scheduleId={schedule.id}
-                />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="helper-text">No upcoming active schedule runs are available.</p>
-        )}
-        <a
-          className="text-button"
-          href={pipelineSchedulesUrl(project.webUrl)}
-          rel="noreferrer"
-          target="_blank"
-        >
-          Open schedules in GitLab
-        </a>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      aria-labelledby={`project-row-tab-${project.id}-merge-requests`}
-      className="summary-stack"
-      id={`project-row-panel-${project.id}-merge-requests`}
-      role="tabpanel"
-    >
-      <h3 className="section-heading">Open merge requests</h3>
-      {project.mergeRequests.length ? (
-        <div className="merge-request-list">
-          {project.mergeRequests.map((mergeRequest) => (
-            <a
-              className="merge-request-link"
-              href={mergeRequest.webUrl}
-              key={mergeRequest.id}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <span className="merge-request-title">!{mergeRequest.iid} {mergeRequest.title}</span>
-              <span className="merge-request-meta">
-                {formatMergeRequestMeta(mergeRequest)}
-              </span>
-            </a>
-          ))}
-        </div>
-      ) : (
-        <p className="helper-text">No open merge requests right now.</p>
-      )}
-    </div>
   );
 }
 

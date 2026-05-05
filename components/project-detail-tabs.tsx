@@ -13,24 +13,28 @@ import { labelPipeline, statusTone } from "@/lib/pipeline";
 import type { ProjectSummary, RuntimeConfig } from "@/lib/types";
 
 type ProjectDetailTabsProps = {
+  idPrefix?: string;
   onScheduleTriggered?: () => void;
   project: ProjectSummary;
   runtimeConfig?: RuntimeConfig | null;
-  sourceId: string;
+  sourceId?: string;
+  variant?: "full" | "embedded";
 };
 
 type ProjectTab = "issues" | "merge-requests" | "schedules";
 
 export function ProjectDetailTabs({
+  idPrefix = "project-detail",
   onScheduleTriggered,
   project,
   runtimeConfig,
   sourceId,
+  variant = "full",
 }: ProjectDetailTabsProps) {
   const [selectedTab, setSelectedTab] = useState<ProjectTab>(
     project.openMergeRequests ? "merge-requests" : project.schedules.upcoming.length ? "schedules" : "issues",
   );
-  const selectedPanelId = `project-detail-panel-${selectedTab}`;
+  const selectedPanelId = `${idPrefix}-panel-${selectedTab}`;
 
   const detailContent = useMemo(() => {
     switch (selectedTab) {
@@ -65,9 +69,9 @@ export function ProjectDetailTabs({
           <div className="summary-stack">
             <h3 className="section-heading">Upcoming schedules</h3>
             {project.schedules.upcoming.length ? (
-              <div className="schedule-list">
+              <ul className="schedule-list">
                 {project.schedules.upcoming.map((schedule) => (
-                  <div className="schedule-item" key={schedule.id}>
+                  <li className="schedule-item" key={schedule.id}>
                     <span className="schedule-item-title">
                       {schedule.description || schedule.ref || `Schedule ${schedule.id}`}
                     </span>
@@ -81,9 +85,9 @@ export function ProjectDetailTabs({
                       runtimeConfig={runtimeConfig}
                       scheduleId={schedule.id}
                     />
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             ) : (
               <p className="helper-text">No upcoming active schedule runs are available.</p>
             )}
@@ -126,53 +130,68 @@ export function ProjectDetailTabs({
     }
   }, [onScheduleTriggered, project, runtimeConfig, selectedTab]);
 
+  const tabStrip = (
+    <div
+      aria-label={`Detail tabs for ${project.name}`}
+      className="project-detail-tab-list"
+      role="tablist"
+    >
+      <TabButton
+        active={selectedTab === "issues"}
+        count={project.openIssues}
+        label="Issues"
+        onClick={() => setSelectedTab("issues")}
+        panelId={`${idPrefix}-panel-issues`}
+        tabId={`${idPrefix}-tab-issues`}
+      />
+      <TabButton
+        active={selectedTab === "merge-requests"}
+        count={project.openMergeRequests}
+        detail={
+          project.unassignedMergeRequests
+            ? `${project.unassignedMergeRequests} unassigned`
+            : null
+        }
+        label="Merge requests"
+        onClick={() => setSelectedTab("merge-requests")}
+        panelId={`${idPrefix}-panel-merge-requests`}
+        tabId={`${idPrefix}-tab-merge-requests`}
+      />
+      <TabButton
+        active={selectedTab === "schedules"}
+        count={project.schedules.total}
+        label="Schedules"
+        onClick={() => setSelectedTab("schedules")}
+        panelId={`${idPrefix}-panel-schedules`}
+        tabId={`${idPrefix}-tab-schedules`}
+      />
+    </div>
+  );
+
+  const detailPanel = (
+    <div
+      aria-labelledby={`${idPrefix}-tab-${selectedTab}`}
+      className="summary-stack project-detail-tab-panel"
+      id={selectedPanelId}
+      role="tabpanel"
+    >
+      {detailContent}
+    </div>
+  );
+
+  if (variant === "embedded") {
+    return (
+      <div className="project-detail-tab-embedded">
+        <div className="summary-stack project-detail-tab-shell">{tabStrip}</div>
+        {detailPanel}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="project-detail-top-grid">
-        <div className="summary-stack project-detail-tab-shell">
-          <div className="section-heading-row">
-            <h3 className="section-heading">Detail tabs</h3>
-            <span className="helper-text">Choose issues, merge requests, or schedules.</span>
-          </div>
-          <div
-            aria-label={`Detail tabs for ${project.name}`}
-            className="metric-grid project-detail-tab-grid"
-            role="tablist"
-          >
-            <TabMetricCard
-              active={selectedTab === "issues"}
-              detail="Issue tab"
-              label="Open issues"
-              onClick={() => setSelectedTab("issues")}
-              panelId="project-detail-panel-issues"
-              tabId="project-detail-tab-issues"
-              value={project.openIssues}
-            />
-            <TabMetricCard
-              active={selectedTab === "merge-requests"}
-              detail="Merge requests tab"
-              label="Open merge requests"
-              onClick={() => setSelectedTab("merge-requests")}
-              panelId="project-detail-panel-merge-requests"
-              tabId="project-detail-tab-merge-requests"
-              value={project.openMergeRequests}
-            />
-            <TabMetricCard
-              active={selectedTab === "schedules"}
-              detail="Schedules tab"
-              label="Schedules"
-              onClick={() => setSelectedTab("schedules")}
-              panelId="project-detail-panel-schedules"
-              tabId="project-detail-tab-schedules"
-              value={project.schedules.total}
-            />
-            <div className="metric-card project-detail-tab-summary">
-              <span className="metric-label">Unassigned MRs</span>
-              <span className="metric-value">{project.unassignedMergeRequests}</span>
-              <span className="metric-detail">Merge request summary</span>
-            </div>
-          </div>
-        </div>
+        <div className="summary-stack project-detail-tab-shell">{tabStrip}</div>
         <div className="metric-card">
           <span className="metric-label">Latest pipeline</span>
           <span className={`status-pill ${statusTone(project.latestPipeline?.status)}`}>
@@ -184,27 +203,24 @@ export function ProjectDetailTabs({
 
       <div className="project-card-detail-grid">
         <div className="summary-stack">
-          <ProjectJiraKeyForm
-            currentKeys={project.jiraProjectKeys}
-            jiraBaseUrl={project.jiraBaseUrl}
-            projectId={project.id}
-            projectReference={project.pathWithNamespace}
-            sourceId={sourceId}
-          />
-          <ProjectSonarKeyForm
-            currentKey={project.sonarProjectKey}
-            projectId={project.id}
-            projectReference={project.pathWithNamespace}
-            sourceId={sourceId}
-          />
-          <div
-            aria-labelledby={`project-detail-tab-${selectedTab}`}
-            className="summary-stack"
-            id={selectedPanelId}
-            role="tabpanel"
-          >
-            {detailContent}
-          </div>
+          {sourceId ? (
+            <>
+              <ProjectJiraKeyForm
+                currentKeys={project.jiraProjectKeys}
+                jiraBaseUrl={project.jiraBaseUrl}
+                projectId={project.id}
+                projectReference={project.pathWithNamespace}
+                sourceId={sourceId}
+              />
+              <ProjectSonarKeyForm
+                currentKey={project.sonarProjectKey}
+                projectId={project.id}
+                projectReference={project.pathWithNamespace}
+                sourceId={sourceId}
+              />
+            </>
+          ) : null}
+          {detailPanel}
         </div>
 
         <div className="summary-stack project-card-histogram">
@@ -227,36 +243,38 @@ export function ProjectDetailTabs({
   );
 }
 
-function TabMetricCard({
+function TabButton({
   active,
+  count,
   detail,
   label,
   onClick,
   panelId,
   tabId,
-  value,
 }: {
   active: boolean;
-  detail: string;
+  count: number | string;
+  detail?: string | null;
   label: string;
   onClick: () => void;
   panelId: string;
   tabId: string;
-  value: number | string;
 }) {
   return (
     <button
       aria-controls={panelId}
       aria-selected={active}
-      className={`metric-card metric-card-button${active ? " active" : ""}`}
+      className={`project-detail-tab${active ? " active" : ""}`}
       id={tabId}
       onClick={onClick}
       role="tab"
       type="button"
     >
-      <span className="metric-label">{label}</span>
-      <span className="metric-value">{value}</span>
-      <span className="metric-detail">{detail}</span>
+      <span className="project-detail-tab-title">
+        <span className="project-detail-tab-label">{label}</span>
+        <span className="project-detail-tab-badge">{count}</span>
+      </span>
+      {detail ? <span className="project-detail-tab-detail">{detail}</span> : null}
     </button>
   );
 }

@@ -16,7 +16,7 @@ import type {
 import { preferRuntimeValue } from "./runtime-config";
 import { createConcurrencyLimiter } from "./concurrency-limit";
 import { describeRequestError } from "./request-errors";
-import { logServerDebug, logServerError } from "./server-log";
+import { logServerDebug, logServerError, logServerExternalRequest } from "./server-log";
 import { summarizeDependencyVulnerabilities } from "./dependency-vulnerabilities";
 
 type GitLabGroupResponse = {
@@ -85,7 +85,7 @@ type GitLabProjectLanguagesResponse = Record<string, number>;
 
 const SEARCH_CACHE_TTL_MS = 60_000;
 const SEARCH_RESULT_LIMIT = 20;
-const runGitLabRequest = createConcurrencyLimiter(6);
+const runGitLabRequest = createConcurrencyLimiter(2);
 const searchCache = new Map<
   string,
   { expiresAt: number; results: SourceSuggestion[] }
@@ -549,9 +549,16 @@ async function fetchGitLabResponse(
     );
   }
 
+  logServerExternalRequest("gitlab-request", {
+    baseUrl,
+    method: init?.method ?? "GET",
+    path,
+    status: response.status,
+  });
   logServerDebug("gitlab-request", "GitLab request completed", {
     path,
     baseUrl,
+    method: init?.method ?? "GET",
     status: response.status,
   });
   if (response.ok) {

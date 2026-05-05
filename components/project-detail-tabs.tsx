@@ -5,15 +5,17 @@ import { DependencyVulnerabilityPanel } from "@/components/dependency-vulnerabil
 import { JiraProjectLinks } from "@/components/jira-project-links";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
 import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
+import { ProjectReloadButton } from "@/components/project-reload-button";
 import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
 import { formatMergeRequestMeta } from "@/lib/merge-request-meta";
 import { labelPipeline, statusTone } from "@/lib/pipeline";
-import type { ProjectSummary, RuntimeConfig } from "@/lib/types";
+import type { ActionState, ProjectSummary, RuntimeConfig } from "@/lib/types";
 
 type ProjectDetailTabsProps = {
   idPrefix?: string;
+  onReloadProject?: () => Promise<ActionState>;
   onScheduleTriggered?: () => void;
   project: ProjectSummary;
   runtimeConfig?: RuntimeConfig | null;
@@ -25,6 +27,7 @@ type ProjectTab = "issues" | "merge-requests" | "schedules";
 
 export function ProjectDetailTabs({
   idPrefix = "project-detail",
+  onReloadProject,
   onScheduleTriggered,
   project,
   runtimeConfig,
@@ -205,6 +208,9 @@ export function ProjectDetailTabs({
         <div className="summary-stack">
           {sourceId ? (
             <>
+              {onReloadProject ? (
+                <ProjectReloadButton onReload={onReloadProject} />
+              ) : null}
               <ProjectJiraKeyForm
                 currentKeys={project.jiraProjectKeys}
                 jiraBaseUrl={project.jiraBaseUrl}

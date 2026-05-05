@@ -9,7 +9,6 @@ import { readDashboardSnapshotEntries, writeDashboardSnapshot } from "@/lib/dash
 import { getGitLabConfigError } from "@/lib/gitlab";
 import { runWithRequestContext } from "@/lib/request-context";
 import { parseRuntimeConfigValue } from "@/lib/runtime-config";
-import { resolveJiraBaseUrl } from "@/lib/server-jira";
 import { logServerDebug, logServerError } from "@/lib/server-log";
 import {
   materializeSourceDashboard,

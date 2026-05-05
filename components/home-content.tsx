@@ -19,6 +19,7 @@ import type {
   ActionState,
   DashboardResponsePayload,
   DashboardSnapshotSummary,
+  ProjectRefreshResponsePayload,
   RuntimeConfig,
   SavedSource,
   SourceDashboard,
@@ -425,6 +426,57 @@ export function HomeContent({
     void loadDashboards(hasVisibleDashboardData ? "manual" : "initial");
   }, [canRefreshDashboards, hasVisibleDashboardData, loadDashboards]);
 
+  const handleProjectReload = useCallback(
+    async (sourceId: string, projectId: number, projectName: string): Promise<ActionState> => {
+      if (!canRefreshDashboards) {
+        return {
+          status: "error",
+          message: "Live refresh is not available right now.",
+        };
+      }
+
+      try {
+        const response = await fetch("/api/dashboard/project", {
+          body: JSON.stringify({
+            projectId,
+            runtimeConfig,
+            sourceId,
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+        const payload = (await response.json()) as Partial<ProjectRefreshResponsePayload> & {
+          message?: string;
+        };
+
+        if (!response.ok || !payload.dashboard) {
+          throw new Error(payload.message || "Unable to reload that project.");
+        }
+
+        setLoadedDashboards((currentDashboards) =>
+          replaceDashboardBySourceId(currentDashboards, payload.dashboard!),
+        );
+        setRuntimeDashboardError("");
+        setBackgroundRefreshPending(false);
+        setNextRefreshAt(autoRefreshEnabled ? Date.now() + autoRefreshIntervalMs : 0);
+        setRefreshStatusText(`Reloaded ${projectName}.`);
+
+        return {
+          status: "success",
+          message: payload.message || `Reloaded ${projectName}.`,
+        };
+      } catch (error) {
+        return {
+          status: "error",
+          message: describeRequestError(error, `Unable to reload ${projectName} right now.`),
+        };
+      }
+    },
+    [autoRefreshEnabled, canRefreshDashboards, runtimeConfig],
+  );
+
   return (
     <main className="shell">
       <section className="hero">
@@ -531,6 +583,7 @@ export function HomeContent({
               <SourceCard
                 dashboard={dashboard}
                 key={dashboard.savedSource.id}
+                onReloadProject={handleProjectReload}
                 onScheduleTriggered={handleScheduleTriggered}
                 runtimeConfig={runtimeConfig}
               />
@@ -814,6 +867,15 @@ function mergeDashboardsPreservingSuccess(
   };
 }
 
+function replaceDashboardBySourceId(
+  dashboards: SourceDashboard[],
+  nextDashboard: SourceDashboard,
+) {
+  return dashboards.map((dashboard) =>
+    dashboard.savedSource.id === nextDashboard.savedSource.id ? nextDashboard : dashboard,
+  );
+}
+
 function getTransientSourceErrorMessage(dashboards: SourceDashboard[]) {
   for (const dashboard of dashboards) {
     if (!("error" in dashboard)) {
@@ -889,10 +951,12 @@ function SavedSourcesList({
 
 function SourceCard({
   dashboard,
+  onReloadProject,
   onScheduleTriggered,
   runtimeConfig,
 }: {
   dashboard: SourceDashboard;
+  onReloadProject: (sourceId: string, projectId: number, projectName: string) => Promise<ActionState>;
   onScheduleTriggered: () => void;
   runtimeConfig?: RuntimeConfig | null;
 }) {
@@ -938,6 +1002,7 @@ function SourceCard({
     return (
       <ProjectSourceCard
         dashboard={dashboard}
+        onReloadProject={onReloadProject}
         onScheduleTriggered={onScheduleTriggered}
         runtimeConfig={runtimeConfig}
       />
@@ -947,6 +1012,7 @@ function SourceCard({
   return (
     <GroupSourceCard
       dashboard={dashboard}
+      onReloadProject={onReloadProject}
       onScheduleTriggered={onScheduleTriggered}
       runtimeConfig={runtimeConfig}
     />
@@ -955,10 +1021,12 @@ function SourceCard({
 
 function ProjectSourceCard({
   dashboard,
+  onReloadProject,
   onScheduleTriggered,
   runtimeConfig,
 }: {
   dashboard: Extract<SourceDashboard, { kind: "project" }>;
+  onReloadProject: (sourceId: string, projectId: number, projectName: string) => Promise<ActionState>;
   onScheduleTriggered: () => void;
   runtimeConfig?: RuntimeConfig | null;
 }) {
@@ -996,6 +1064,7 @@ function ProjectSourceCard({
       </div>
 
       <ProjectDetailTabs
+        onReloadProject={() => onReloadProject(savedSource.id, project.id, project.name)}
         onScheduleTriggered={onScheduleTriggered}
         project={project}
         runtimeConfig={runtimeConfig}
@@ -1007,10 +1076,12 @@ function ProjectSourceCard({
 
 function GroupSourceCard({
   dashboard,
+  onReloadProject,
   onScheduleTriggered,
   runtimeConfig,
 }: {
   dashboard: Extract<SourceDashboard, { kind: "group" }>;
+  onReloadProject: (sourceId: string, projectId: number, projectName: string) => Promise<ActionState>;
   onScheduleTriggered: () => void;
   runtimeConfig?: RuntimeConfig | null;
 }) {
@@ -1047,6 +1118,9 @@ function GroupSourceCard({
 
       <GroupTreeFilter
         group={group}
+        onReloadProject={(projectId, projectName) =>
+          onReloadProject(savedSource.id, projectId, projectName)
+        }
         onScheduleTriggered={onScheduleTriggered}
         runtimeConfig={runtimeConfig}
         sourceId={savedSource.id}

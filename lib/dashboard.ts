@@ -260,7 +260,7 @@ async function refreshProjectInGroupNode(
   jiraProjectKeysByGitLabId: Map<number, string[]>,
   sonarProjectKeysByGitLabId: Map<number, string | null>,
   runtimeConfig?: RuntimeConfig | null,
-) {
+): Promise<{ found: boolean; group: GroupNode }> {
   let found = false;
 
   const projects = await Promise.all(

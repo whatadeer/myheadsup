@@ -15,15 +15,17 @@ import { ProjectDetailTabs } from "@/components/project-detail-tabs";
 import { ProjectJiraKeyForm } from "@/components/project-jira-key-form";
 import { PipelineHistogram } from "@/components/pipeline-histogram";
 import { ProjectQueryExcludeForm } from "@/components/project-query-exclude-form";
+import { ProjectReloadButton } from "@/components/project-reload-button";
 import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
 import { formatProjectLanguages, labelPrimaryLanguage } from "@/lib/project-languages";
 import { labelPipeline, pipelineStatusEntries, projectPipelineStatus, statusTone } from "@/lib/pipeline";
-import type { GroupNode, ProjectSummary, RuntimeConfig } from "@/lib/types";
+import type { ActionState, GroupNode, ProjectSummary, RuntimeConfig } from "@/lib/types";
 
 type GroupTreeFilterProps = {
   group: GroupNode;
+  onReloadProject?: (projectId: number, projectName: string) => Promise<ActionState>;
   onScheduleTriggered?: () => void;
   runtimeConfig?: RuntimeConfig | null;
   sourceId: string;
@@ -36,6 +38,7 @@ type VisibleGroupNode = Omit<GroupNode, "projects" | "subgroups"> & {
 
 export function GroupTreeFilter({
   group,
+  onReloadProject,
   onScheduleTriggered,
   runtimeConfig,
   sourceId,
@@ -317,6 +320,7 @@ export function GroupTreeFilter({
             {visibleGroup.projects.map((project) => (
               <ProjectRow
                 key={project.id}
+                onReloadProject={onReloadProject}
                 onScheduleTriggered={onScheduleTriggered}
                 project={project}
                 runtimeConfig={runtimeConfig}
@@ -331,6 +335,7 @@ export function GroupTreeFilter({
           <GroupTreeNode
             group={subgroup}
             key={subgroup.id}
+            onReloadProject={onReloadProject}
             onScheduleTriggered={onScheduleTriggered}
             runtimeConfig={runtimeConfig}
             selectedDate={selectedDate}
@@ -365,12 +370,14 @@ export function GroupTreeFilter({
 
 function GroupTreeNode({
   group,
+  onReloadProject,
   onScheduleTriggered,
   runtimeConfig,
   selectedDate,
   sourceId,
 }: {
   group: VisibleGroupNode;
+  onReloadProject?: (projectId: number, projectName: string) => Promise<ActionState>;
   onScheduleTriggered?: () => void;
   runtimeConfig?: RuntimeConfig | null;
   selectedDate: string | null;
@@ -409,6 +416,7 @@ function GroupTreeNode({
           {group.projects.map((project) => (
             <ProjectRow
               key={project.id}
+              onReloadProject={onReloadProject}
               onScheduleTriggered={onScheduleTriggered}
               project={project}
               runtimeConfig={runtimeConfig}
@@ -420,6 +428,7 @@ function GroupTreeNode({
             <GroupTreeNode
               group={subgroup}
               key={subgroup.id}
+              onReloadProject={onReloadProject}
               onScheduleTriggered={onScheduleTriggered}
               runtimeConfig={runtimeConfig}
               selectedDate={selectedDate}
@@ -433,12 +442,14 @@ function GroupTreeNode({
 }
 
 function ProjectRow({
+  onReloadProject,
   onScheduleTriggered,
   project,
   runtimeConfig,
   selectedDate,
   sourceId,
 }: {
+  onReloadProject?: (projectId: number, projectName: string) => Promise<ActionState>;
   onScheduleTriggered?: () => void;
   project: ProjectSummary;
   runtimeConfig?: RuntimeConfig | null;
@@ -465,6 +476,11 @@ function ProjectRow({
               </summary>
               <div className="project-settings-body">
                 <div className="project-settings-heading">Project settings</div>
+                {onReloadProject ? (
+                  <ProjectReloadButton
+                    onReload={() => onReloadProject(project.id, project.name)}
+                  />
+                ) : null}
                 <ProjectJiraKeyForm
                   currentKeys={project.jiraProjectKeys}
                   embedded

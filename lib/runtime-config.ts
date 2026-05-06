@@ -58,10 +58,6 @@ export function hasRuntimeConfigValues(config: RuntimeConfig | null | undefined)
   );
 }
 
-export function getRuntimeConfigValidationError(config: RuntimeConfig | null | undefined) {
-  return getRuntimeConfigValidationErrorWithOptions(config, { requireGitLab: true });
-}
-
 export function getRuntimeConfigValidationErrorWithOptions(
   config: RuntimeConfig | null | undefined,
   options: { requireGitLab: boolean },

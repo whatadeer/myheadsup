@@ -382,6 +382,11 @@
   align-items: stretch;
 }
 
+.merge-request-summary-item {
+  grid-template-columns: minmax(160px, 1.1fr) minmax(0, 2fr);
+  align-items: start;
+}
+
 .vulnerability-summary-projects {
   gap: 4px;
 }

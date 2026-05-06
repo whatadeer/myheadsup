@@ -8,7 +8,6 @@ import {
   DependencyVulnerabilityGroupSummary,
   type DependencyVulnerabilityGroupSummaryEntry,
 } from "@/components/dependency-vulnerability-group-summary";
-import { DependencyVulnerabilityPanel } from "@/components/dependency-vulnerability-panel";
 import { JiraProjectLinks } from "@/components/jira-project-links";
 import { GroupQueryExcludeForm } from "@/components/group-query-exclude-form";
 import { ProjectDetailTabs } from "@/components/project-detail-tabs";
@@ -19,6 +18,7 @@ import { ProjectReloadButton } from "@/components/project-reload-button";
 import { ScheduleRunButton } from "@/components/schedule-run-button";
 import { ProjectSonarKeyForm } from "@/components/project-sonar-key-form";
 import { SonarTrendGrid } from "@/components/sonar-trend-grid";
+import { formatMergeRequestMeta, mergeRequestNeedsReviewer } from "@/lib/merge-request-meta";
 import { formatProjectLanguages, labelPrimaryLanguage } from "@/lib/project-languages";
 import { labelPipeline, pipelineStatusEntries, projectPipelineStatus, statusTone } from "@/lib/pipeline";
 import type { ActionState, GroupNode, ProjectSummary, RuntimeConfig } from "@/lib/types";
@@ -43,11 +43,10 @@ export function GroupTreeFilter({
   runtimeConfig,
   sourceId,
 }: GroupTreeFilterProps) {
-  const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showMergeRequestsOnly, setShowMergeRequestsOnly] = useState(false);
-  const [showUnassignedMergeRequestsOnly, setShowUnassignedMergeRequestsOnly] = useState(false);
+  const [showNeedsReviewerMergeRequestsOnly, setShowNeedsReviewerMergeRequestsOnly] = useState(false);
   const [showSchedulesOnly, setShowSchedulesOnly] = useState(false);
   const [showWithoutSchedulesOnly, setShowWithoutSchedulesOnly] = useState(false);
   const [showDependencyVulnerabilitiesOnly, setShowDependencyVulnerabilitiesOnly] = useState(false);
@@ -57,8 +56,12 @@ export function GroupTreeFilter({
     () => countProjects(group, (project) => project.schedules.total === 0),
     [group],
   );
-  const dependencyVulnerabilityCount = useMemo(
-    () => countDependencyVulnerabilities(group),
+  const vulnerablePackageCount = useMemo(
+    () => countUniqueDependencyPackages(group),
+    [group],
+  );
+  const vulnerableProjectCount = useMemo(
+    () => countProjects(group, (project) => projectHasDependencyVulnerabilities(project)),
     [group],
   );
   const dependencySeverityEntries = useMemo(() => collectDependencySeverityEntries(group), [group]);
@@ -70,9 +73,8 @@ export function GroupTreeFilter({
         selectedStatus,
         selectedLanguage,
         selectedDate,
-        showIssuesOnly,
         showMergeRequestsOnly,
-        showUnassignedMergeRequestsOnly,
+        showNeedsReviewerMergeRequestsOnly,
         showSchedulesOnly,
         showWithoutSchedulesOnly,
         showDependencyVulnerabilitiesOnly,
@@ -85,9 +87,8 @@ export function GroupTreeFilter({
       selectedStatus,
       selectedDependencySeverity,
       showDependencyVulnerabilitiesOnly,
-      showIssuesOnly,
       showMergeRequestsOnly,
-      showUnassignedMergeRequestsOnly,
+      showNeedsReviewerMergeRequestsOnly,
       showSchedulesOnly,
       showWithoutSchedulesOnly,
     ],
@@ -100,24 +101,6 @@ export function GroupTreeFilter({
   return (
     <>
       <div className="metric-grid">
-        <MetricCard
-          active={showIssuesOnly}
-          detail={
-            group.summary.openIssues
-              ? showIssuesOnly
-                ? "Showing only projects with open issues"
-                : "Click to filter projects with open issues"
-              : "No open issues in this group"
-          }
-          label="Open issues"
-          onClick={
-            group.summary.openIssues
-              ? () => setShowIssuesOnly((currentValue) => !currentValue)
-              : undefined
-          }
-          value={group.summary.openIssues}
-          valueHref={issuesUrl(group.webUrl)}
-        />
         <MetricCard
           active={showMergeRequestsOnly}
           detail={
@@ -136,21 +119,21 @@ export function GroupTreeFilter({
           value={group.summary.openMergeRequests}
         />
         <MetricCard
-          active={showUnassignedMergeRequestsOnly}
+          active={showNeedsReviewerMergeRequestsOnly}
           detail={
-            group.summary.unassignedMergeRequests
-              ? showUnassignedMergeRequestsOnly
-                ? "Showing only projects with unassigned MRs"
-                : "Click to filter projects with unassigned MRs"
-              : "No unassigned merge requests in this group"
+            group.summary.needsReviewerMergeRequests
+              ? showNeedsReviewerMergeRequestsOnly
+                ? "Showing only projects with MRs that need reviewers"
+                : "Click to filter projects with MRs that need reviewers"
+              : "No merge requests need reviewers in this group"
           }
-          label="Unassigned MRs"
+          label="Needs reviewer"
           onClick={
-            group.summary.unassignedMergeRequests
-              ? () => setShowUnassignedMergeRequestsOnly((currentValue) => !currentValue)
+            group.summary.needsReviewerMergeRequests
+              ? () => setShowNeedsReviewerMergeRequestsOnly((currentValue) => !currentValue)
               : undefined
           }
-          value={group.summary.unassignedMergeRequests}
+          value={group.summary.needsReviewerMergeRequests}
         />
         <MetricCard
           active={showSchedulesOnly}
@@ -170,7 +153,7 @@ export function GroupTreeFilter({
                 }
               : undefined
           }
-          value={`${group.summary.schedules.active} of ${group.summary.schedules.total}`}
+          value={formatActiveScheduleCount(group.summary.schedules.active, group.summary.schedules.total)}
         />
         <MetricCard
           active={showWithoutSchedulesOnly}
@@ -195,19 +178,19 @@ export function GroupTreeFilter({
         <MetricCard
           active={showDependencyVulnerabilitiesOnly}
           detail={
-            dependencyVulnerabilityCount
+            vulnerablePackageCount
               ? showDependencyVulnerabilitiesOnly
-                ? "Showing only projects with impacted dependencies"
-                : "Click to filter projects with impacted dependencies"
-              : "No impacted dependencies found in this group"
+                ? `Showing ${formatPackageProjectSummary(vulnerablePackageCount, vulnerableProjectCount)}`
+                : `Filter ${formatPackageProjectSummary(vulnerablePackageCount, vulnerableProjectCount)}`
+              : "No vulnerable packages found in this group"
           }
-          label="Dependencies impacted"
+          label="Vulnerable packages"
           onClick={
-            dependencyVulnerabilityCount
+            vulnerablePackageCount
               ? () => setShowDependencyVulnerabilitiesOnly((currentValue) => !currentValue)
               : undefined
           }
-          value={dependencyVulnerabilityCount}
+          value={`${vulnerablePackageCount} packages`}
         />
       </div>
 
@@ -219,7 +202,7 @@ export function GroupTreeFilter({
             onClick={() => setSelectedDependencySeverity(null)}
             type="button"
           >
-            All {dependencyVulnerabilityCount}
+            All {vulnerablePackageCount}
           </button>
           {dependencySeverityEntries.map(([severity, count]) => (
             <button
@@ -304,6 +287,7 @@ export function GroupTreeFilter({
         />
       </div>
 
+      <OpenMergeRequestRollup group={visibleGroup} />
       <NextScheduledRuns
         group={group}
         onScheduleTriggered={onScheduleTriggered}
@@ -346,15 +330,14 @@ export function GroupTreeFilter({
         {!visibleGroup.projects.length && !visibleGroup.subgroups.length ? (
           <p className="helper-text">
             No projects match
-            {showIssuesOnly ? " with open issues" : ""}
             {showMergeRequestsOnly ? " with open merge requests" : ""}
-            {showUnassignedMergeRequestsOnly ? " with unassigned merge requests" : ""}
+            {showNeedsReviewerMergeRequestsOnly ? " with merge requests that need reviewers" : ""}
             {showSchedulesOnly ? " with schedules" : ""}
             {showWithoutSchedulesOnly ? " without schedules" : ""}
             {selectedDependencySeverity
-              ? ` with ${selectedDependencySeverity.toLowerCase()} impacted dependencies`
+              ? ` with ${selectedDependencySeverity.toLowerCase()} vulnerable packages`
               : showDependencyVulnerabilitiesOnly
-                ? " with impacted dependencies"
+                ? " with vulnerable packages"
                 : ""}
             {selectedLanguage ? ` for ${selectedLanguage}` : ""}
             {selectedStatus ? ` ${labelPipeline(selectedStatus).toLowerCase()}` : ""}
@@ -404,9 +387,9 @@ function GroupTreeNode({
               {group.summary.openIssues} issues
             </a>
             <span>{group.summary.openMergeRequests} MRs</span>
-            <span>{group.summary.unassignedMergeRequests} unassigned</span>
+            <span>{formatNeedsReviewerCount(group.summary.needsReviewerMergeRequests)}</span>
             <span>
-              {group.summary.schedules.active}/{group.summary.schedules.total} schedules active
+              {formatScheduleSummary(group.summary.schedules.active, group.summary.schedules.total)}
             </span>
           </div>
         </div>
@@ -515,9 +498,6 @@ function ProjectRow({
             jiraProjectKeys={project.jiraProjectKeys}
             label="Jira projects"
           />
-          {project.dependencyVulnerabilities ? (
-            <DependencyVulnerabilityPanel summary={project.dependencyVulnerabilities} />
-          ) : null}
           <ProjectDetailTabs
             idPrefix={`project-row-${project.id}`}
             onScheduleTriggered={onScheduleTriggered}
@@ -609,9 +589,8 @@ function filterGroupNode(
   selectedStatus: string | null,
   selectedLanguage: string | null,
   selectedDate: string | null,
-  showIssuesOnly: boolean,
   showMergeRequestsOnly: boolean,
-  showUnassignedMergeRequestsOnly: boolean,
+  showNeedsReviewerMergeRequestsOnly: boolean,
   showSchedulesOnly: boolean,
   showWithoutSchedulesOnly: boolean,
   showDependencyVulnerabilitiesOnly: boolean,
@@ -621,21 +600,20 @@ function filterGroupNode(
     !selectedStatus &&
     !selectedLanguage &&
     !selectedDate &&
-    !showIssuesOnly &&
     !showMergeRequestsOnly &&
-    !showUnassignedMergeRequestsOnly &&
+    !showNeedsReviewerMergeRequestsOnly &&
     !showSchedulesOnly &&
     !showWithoutSchedulesOnly &&
     !showDependencyVulnerabilitiesOnly &&
     !selectedDependencySeverity
   ) {
-    return {
-      ...group,
-      projects: group.projects,
-      subgroups: group.subgroups.map((subgroup) =>
-        filterGroupNode(subgroup, null, null, null, false, false, false, false, false, false, null),
-      ),
-    };
+      return {
+        ...group,
+        projects: group.projects,
+        subgroups: group.subgroups.map((subgroup) =>
+          filterGroupNode(subgroup, null, null, null, false, false, false, false, false, null),
+        ),
+      };
   }
 
   return {
@@ -648,12 +626,11 @@ function filterGroupNode(
         ? project.languages.primary === selectedLanguage
         : true;
       const matchesDate = selectedDate ? hasPipelineActivityOnDate(project, selectedDate) : true;
-      const matchesIssues = showIssuesOnly ? project.openIssues > 0 : true;
       const matchesMergeRequests = showMergeRequestsOnly
         ? project.openMergeRequests > 0
         : true;
-      const matchesUnassignedMergeRequests = showUnassignedMergeRequestsOnly
-        ? project.unassignedMergeRequests > 0
+      const matchesNeedsReviewerMergeRequests = showNeedsReviewerMergeRequestsOnly
+        ? project.needsReviewerMergeRequests > 0
         : true;
       const matchesSchedules = showSchedulesOnly
         ? project.schedules.total > 0
@@ -672,9 +649,8 @@ function filterGroupNode(
         matchesStatus &&
         matchesLanguage &&
         matchesDate &&
-        matchesIssues &&
         matchesMergeRequests &&
-        matchesUnassignedMergeRequests &&
+        matchesNeedsReviewerMergeRequests &&
         matchesSchedules &&
         matchesWithoutSchedules &&
         matchesDependencyVulnerabilities &&
@@ -688,9 +664,8 @@ function filterGroupNode(
           selectedStatus,
           selectedLanguage,
           selectedDate,
-          showIssuesOnly,
           showMergeRequestsOnly,
-          showUnassignedMergeRequestsOnly,
+          showNeedsReviewerMergeRequestsOnly,
           showSchedulesOnly,
           showWithoutSchedulesOnly,
           showDependencyVulnerabilitiesOnly,
@@ -753,15 +728,16 @@ function MetricCard({
   );
 }
 
-function countDependencyVulnerabilities(group: GroupNode) {
-  let total = 0;
+function countUniqueDependencyPackages(group: GroupNode) {
+  const packageNames = new Set<string>();
 
-  countProjects(group, (project) => {
-    total += project.dependencyVulnerabilities?.totalCount ?? 0;
-    return false;
+  visitProjects(group, (project) => {
+    for (const item of project.dependencyVulnerabilities?.items ?? []) {
+      packageNames.add(item.packageName);
+    }
   });
 
-  return total;
+  return packageNames.size;
 }
 
 function collectDependencySeverityEntries(group: GroupNode) {
@@ -830,6 +806,10 @@ function collectDependencyPackageEntries(
     );
 }
 
+function formatPackageProjectSummary(packageCount: number, projectCount: number) {
+  return `${packageCount} package${packageCount === 1 ? "" : "s"} across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
+}
+
 function projectHasDependencyVulnerabilities(project: ProjectSummary) {
   return (project.dependencyVulnerabilities?.totalCount ?? 0) > 0;
 }
@@ -890,6 +870,28 @@ type NextRunEntry = {
   schedule: ProjectSummary["schedules"]["upcoming"][number];
 };
 
+type MergeRequestRollupEntry = {
+  mergeRequest: ProjectSummary["mergeRequests"][number];
+  project: ProjectSummary;
+};
+
+function collectOpenMergeRequests(group: GroupNode): MergeRequestRollupEntry[] {
+  const entries: MergeRequestRollupEntry[] = [];
+
+  visitProjects(group, (project) => {
+    for (const mergeRequest of project.mergeRequests) {
+      entries.push({ project, mergeRequest });
+    }
+  });
+
+  return entries.sort(
+    (left, right) =>
+      String(right.mergeRequest.updatedAt).localeCompare(String(left.mergeRequest.updatedAt)) ||
+      left.project.name.localeCompare(right.project.name) ||
+      left.mergeRequest.title.localeCompare(right.mergeRequest.title),
+  );
+}
+
 function collectNextRuns(group: GroupNode): NextRunEntry[] {
   const entries: NextRunEntry[] = [];
 
@@ -909,6 +911,51 @@ function collectNextRuns(group: GroupNode): NextRunEntry[] {
 
   return entries.sort((left, right) =>
     String(left.schedule.nextRunAt).localeCompare(String(right.schedule.nextRunAt)),
+  );
+}
+
+function OpenMergeRequestRollup({
+  group,
+}: Readonly<{
+  group: GroupNode;
+}>) {
+  const entries = useMemo(() => collectOpenMergeRequests(group), [group]);
+
+  if (!entries.length) {
+    return null;
+  }
+
+  const needsReviewerCount = entries.filter(({ mergeRequest }) => mergeRequestNeedsReviewer(mergeRequest)).length;
+  const detail = needsReviewerCount
+    ? `${entries.length} MR${entries.length === 1 ? "" : "s"} - ${formatNeedsReviewerCount(needsReviewerCount)}`
+    : `${entries.length} MR${entries.length === 1 ? "" : "s"}`;
+
+  return (
+    <CollapsibleRollup detail={detail} title="Open merge requests">
+      <ul className="next-runs-list">
+        {entries.map(({ project, mergeRequest }) => (
+          <li className="next-runs-item merge-request-summary-item" key={`${project.id}-${mergeRequest.id}`}>
+            <a
+              className="next-runs-project"
+              href={project.webUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {project.name}
+            </a>
+            <a
+              className="merge-request-link"
+              href={mergeRequest.webUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <span className="merge-request-title">!{mergeRequest.iid} {mergeRequest.title}</span>
+              <span className="merge-request-meta">{formatMergeRequestMeta(mergeRequest)}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </CollapsibleRollup>
   );
 }
 
@@ -966,6 +1013,26 @@ function formatSelectedDate(value: string) {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
+}
+
+function formatNeedsReviewerCount(count: number) {
+  return `${count} need${count === 1 ? "s" : ""} reviewer`;
+}
+
+function formatActiveScheduleCount(active: number, total: number) {
+  if (active === total) {
+    return String(total);
+  }
+
+  return `${active} of ${total}`;
+}
+
+function formatScheduleSummary(active: number, total: number) {
+  if (active === total) {
+    return `${total} schedules active`;
+  }
+
+  return `${active}/${total} schedules active`;
 }
 
 function issuesUrl(webUrl: string) {

@@ -485,7 +485,9 @@ a.hero-integration:hover {
 .refresh-dock {
   right: 20px;
   top: 20px;
-  width: fit-content;
+  display: grid;
+  gap: 8px;
+  width: min(24rem, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
 
   &-row {
@@ -528,6 +530,11 @@ a.hero-integration:hover {
         background: $surface-soft;
       }
     }
+  }
+
+  &-status {
+    margin: 0;
+    line-height: 1.35;
   }
 }
 

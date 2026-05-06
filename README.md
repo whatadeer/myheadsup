@@ -7,7 +7,7 @@ MyHeadsUp is a personal dashboard for self-hosted GitLab. It lets you save the g
 - Save top-level GitLab groups or projects and keep them on one dashboard
 - Expand groups into nested subgroup and project views
 - Track open issues and dependency-dashboard vulnerability counts
-- See merge request status, including unassigned, approval, and rebase-needed signals
+- See merge request status, including needs-reviewer, approval, and rebase-needed signals
 - Review latest pipeline status and 14-day pipeline activity
 - Inspect pipeline schedules and trigger upcoming schedules with **Run now**
 - Attach Jira project keys and SonarQube project keys after saving a source, or through saved query lines

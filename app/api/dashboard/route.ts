@@ -59,7 +59,7 @@ export async function POST(request: Request) {
         logServerError("api-dashboard", new Error(configError), {
           hasRuntimeConfig: Boolean(runtimeConfig),
         });
-        return NextResponse.json({ message: configError }, { status: 400 });
+        return NextResponse.json({ message: configError }, { status: 503 });
       }
 
       const savedSources = await readSources();

@@ -17,7 +17,6 @@ export default async function Home() {
 
   return (
     <HomeContent
-      initialDashboards={[]}
       key={buildHomeContentKey(savedSources, configError)}
       savedSources={savedSources}
       showDebugUrls={debugMode}

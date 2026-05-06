@@ -23,7 +23,7 @@ type ProjectDetailTabsProps = {
   variant?: "full" | "embedded";
 };
 
-type ProjectTab = "issues" | "merge-requests" | "schedules";
+type ProjectTab = "merge-requests" | "schedules" | "vulnerabilities";
 
 export function ProjectDetailTabs({
   idPrefix = "project-detail",
@@ -35,36 +35,23 @@ export function ProjectDetailTabs({
   variant = "full",
 }: ProjectDetailTabsProps) {
   const [selectedTab, setSelectedTab] = useState<ProjectTab>(
-    project.openMergeRequests ? "merge-requests" : project.schedules.upcoming.length ? "schedules" : "issues",
+    project.openMergeRequests
+      ? "merge-requests"
+      : project.dependencyVulnerabilities
+        ? "vulnerabilities"
+        : "schedules",
   );
   const selectedPanelId = `${idPrefix}-panel-${selectedTab}`;
 
   const detailContent = useMemo(() => {
     switch (selectedTab) {
-      case "issues":
-        return (
+      case "vulnerabilities":
+        return project.dependencyVulnerabilities ? (
+          <DependencyVulnerabilityPanel summary={project.dependencyVulnerabilities} />
+        ) : (
           <div className="summary-stack">
-            <h3 className="section-heading">Open issues</h3>
-            {project.issues.length ? (
-              <div className="merge-request-list">
-                {project.issues.map((issue) => (
-                  <a
-                    className="merge-request-link"
-                    href={issue.webUrl}
-                    key={issue.id}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <span className="merge-request-title">#{issue.iid} {issue.title}</span>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <p className="helper-text">No open issues right now.</p>
-            )}
-            <a className="text-button" href={issuesUrl(project.webUrl)} rel="noreferrer" target="_blank">
-              Open issues in GitLab
-            </a>
+            <h3 className="section-heading">Vulnerable dependencies</h3>
+            <p className="helper-text">No vulnerable dependencies right now.</p>
           </div>
         );
       case "schedules":
@@ -140,19 +127,11 @@ export function ProjectDetailTabs({
       role="tablist"
     >
       <TabButton
-        active={selectedTab === "issues"}
-        count={project.openIssues}
-        label="Issues"
-        onClick={() => setSelectedTab("issues")}
-        panelId={`${idPrefix}-panel-issues`}
-        tabId={`${idPrefix}-tab-issues`}
-      />
-      <TabButton
         active={selectedTab === "merge-requests"}
         count={project.openMergeRequests}
         detail={
-          project.unassignedMergeRequests
-            ? `${project.unassignedMergeRequests} unassigned`
+          project.needsReviewerMergeRequests
+            ? formatNeedsReviewerCount(project.needsReviewerMergeRequests)
             : null
         }
         label="Merge requests"
@@ -167,6 +146,14 @@ export function ProjectDetailTabs({
         onClick={() => setSelectedTab("schedules")}
         panelId={`${idPrefix}-panel-schedules`}
         tabId={`${idPrefix}-tab-schedules`}
+      />
+      <TabButton
+        active={selectedTab === "vulnerabilities"}
+        count={project.dependencyVulnerabilities?.totalCount ?? 0}
+        label="Vulnerabilities"
+        onClick={() => setSelectedTab("vulnerabilities")}
+        panelId={`${idPrefix}-panel-vulnerabilities`}
+        tabId={`${idPrefix}-tab-vulnerabilities`}
       />
     </div>
   );
@@ -235,9 +222,6 @@ export function ProjectDetailTabs({
             jiraProjectKeys={project.jiraProjectKeys}
             label="Jira projects"
           />
-          {project.dependencyVulnerabilities ? (
-            <DependencyVulnerabilityPanel summary={project.dependencyVulnerabilities} />
-          ) : null}
           <PipelineHistogram
             buckets={project.pipelineActivity}
             label="Pipeline activity (14 days)"
@@ -247,6 +231,10 @@ export function ProjectDetailTabs({
       </div>
     </>
   );
+}
+
+function formatNeedsReviewerCount(count: number) {
+  return `${count} need${count === 1 ? "s" : ""} reviewer`;
 }
 
 function TabButton({
@@ -313,10 +301,6 @@ function SonarPanel({ project }: { project: ProjectSummary }) {
       <SonarTrendGrid sonar={project.sonar} />
     </div>
   );
-}
-
-function issuesUrl(webUrl: string) {
-  return `${webUrl}/-/issues?state=opened`;
 }
 
 function pipelineSchedulesUrl(webUrl: string) {

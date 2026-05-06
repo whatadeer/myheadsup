@@ -13,6 +13,10 @@ export function formatMergeRequestMeta(mergeRequest: MergeRequestSummary) {
   return [...statusLabels, assigneeLabel, reviewerLabel].filter(Boolean).join(" - ");
 }
 
+export function mergeRequestNeedsReviewer(mergeRequest: MergeRequestSummary) {
+  return mergeRequest.reviewerNames.length === 0;
+}
+
 function formatReviewerLabel(reviewerNames: string[]) {
   if (!reviewerNames.length) {
     return "No Reviewers";

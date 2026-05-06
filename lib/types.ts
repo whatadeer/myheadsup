@@ -173,7 +173,7 @@ export type ProjectSummary = {
   issues: IssueSummary[];
   dependencyVulnerabilities: DependencyVulnerabilitySummary | null;
   openMergeRequests: number;
-  unassignedMergeRequests: number;
+  needsReviewerMergeRequests: number;
   mergeRequests: MergeRequestSummary[];
   sonar: SonarProjectSummary | null;
   schedules: ScheduleSummary;
@@ -186,7 +186,7 @@ export type GroupSummary = {
   projectCount: number;
   openIssues: number;
   openMergeRequests: number;
-  unassignedMergeRequests: number;
+  needsReviewerMergeRequests: number;
   schedules: ScheduleSummary;
   pipelineStatuses: Record<string, number>;
   pipelineActivity: PipelineHistogramBucket[];

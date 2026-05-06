@@ -34,8 +34,14 @@ const startupRetryCount = 3;
 const startupRetryDelayMs = 1_500;
 const runtimeConfigChangeEventName = "myheadsup:runtime-config-change";
 
+type RefreshTrigger = "auto" | "followup" | "initial" | "manual";
+
+type RefreshStatus = {
+  detail: string;
+  label: string;
+};
+
 type HomeContentProps = {
-  initialDashboards: SourceDashboard[];
   savedSources: SavedSource[];
   serverConfigError: string | null;
   showDebugUrls: boolean;
@@ -47,7 +53,6 @@ type HomeContentProps = {
 };
 
 export function HomeContent({
-  initialDashboards,
   savedSources,
   serverConfigError,
   showDebugUrls,
@@ -59,7 +64,7 @@ export function HomeContent({
     readStoredRuntimeConfigSnapshot,
     () => null,
   );
-  const [loadedDashboards, setLoadedDashboards] = useState<SourceDashboard[]>(initialDashboards);
+  const [loadedDashboards, setLoadedDashboards] = useState<SourceDashboard[]>([]);
   const [runtimeDashboardError, setRuntimeDashboardError] = useState("");
   const [runtimeDashboardLoading, setRuntimeDashboardLoading] = useState(false);
   const [backgroundRefreshPending, setBackgroundRefreshPending] = useState(false);
@@ -72,11 +77,8 @@ export function HomeContent({
   const [nextRefreshAt, setNextRefreshAt] = useState(0);
   const [manualRefreshAvailableAt, setManualRefreshAvailableAt] = useState(0);
   const [clockNow, setClockNow] = useState(0);
-  const [refreshStatusText, setRefreshStatusText] = useState(
-    savedSources.length
-      ? "Automatic refresh is off. Turn it on when you want scheduled updates."
-      : "Add a saved source to enable automatic refresh.",
-  );
+  const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState<string | null>(null);
+  const [refreshStatus, setRefreshStatus] = useState(() => buildIdleRefreshStatus(savedSources.length, null));
   const refreshAbortControllerRef = useRef<AbortController | null>(null);
   const initialLoadAttemptedRef = useRef(false);
 
@@ -98,7 +100,7 @@ export function HomeContent({
   };
 
   const loadDashboards = useCallback(
-    async (trigger: "auto" | "followup" | "initial" | "manual") => {
+    async (trigger: RefreshTrigger) => {
       if (!canRefreshDashboards || refreshAbortControllerRef.current) {
         return;
       }
@@ -108,15 +110,7 @@ export function HomeContent({
 
       setRuntimeDashboardLoading(true);
       setRuntimeDashboardError("");
-      setRefreshStatusText(
-        trigger === "manual"
-          ? "Refreshing the dashboard now."
-          : trigger === "followup"
-            ? "Checking for the latest background refresh."
-          : trigger === "initial"
-            ? "Loading the dashboard with live GitLab data."
-            : "Running the scheduled refresh.",
-      );
+      setRefreshStatus(buildLoadingRefreshStatus(trigger, lastDashboardUpdatedAt));
       setNextRefreshAt(
         autoRefreshEnabled ? Date.now() + autoRefreshIntervalMs : 0,
       );
@@ -151,6 +145,7 @@ export function HomeContent({
             resolvedDashboards = payload.dashboards ?? [];
             const nextSnapshotSummary = payload.snapshot ?? createEmptyDashboardSnapshotSummary();
             resolvedSnapshotSummary = nextSnapshotSummary;
+            setLastDashboardUpdatedAt(nextSnapshotSummary.lastUpdatedAt);
             setBackgroundRefreshPending(nextSnapshotSummary.status === "refreshing");
 
             if (!hasVisibleDashboardData) {
@@ -174,8 +169,11 @@ export function HomeContent({
 
             if (attempt < maxAttempts) {
               const retryDelay = startupRetryDelayMs * attempt;
-              setRefreshStatusText(
-                `${message} Retrying in ${formatCountdown(retryDelay)} (${attempt + 1}/${maxAttempts}).`,
+              setRefreshStatus(
+                createRefreshStatus(
+                  `Retrying in ${formatCountdown(retryDelay)}`,
+                  `${message} Retrying in ${formatCountdown(retryDelay)} (${attempt + 1}/${maxAttempts}).`,
+                ),
               );
               await waitForRetry(retryDelay, controller.signal);
               continue;
@@ -204,12 +202,16 @@ export function HomeContent({
           const sourceLabel = preservedErrorCount === 1 ? "source" : "sources";
           const message = `GitLab had a temporary issue during refresh. Keeping the previous data for ${preservedErrorCount} ${sourceLabel}.`;
           setRuntimeDashboardError(message);
-          setRefreshStatusText(message);
+          setRefreshStatus(
+            lastDashboardUpdatedAt
+              ? createLastUpdatedRefreshStatus(lastDashboardUpdatedAt, message)
+              : createRefreshStatus("Using previous data.", message),
+          );
           return;
         }
 
         setRuntimeDashboardError("");
-        setRefreshStatusText(buildDashboardRefreshMessage(trigger, resolvedSnapshotSummary));
+        setRefreshStatus(buildDashboardRefreshStatus(trigger, resolvedSnapshotSummary));
       } catch (error) {
         if (controller.signal.aborted) {
           return;
@@ -221,7 +223,11 @@ export function HomeContent({
         );
         setBackgroundRefreshPending(false);
         setRuntimeDashboardError(message);
-        setRefreshStatusText(message);
+        setRefreshStatus(
+          lastDashboardUpdatedAt
+            ? createLastUpdatedRefreshStatus(lastDashboardUpdatedAt, message)
+            : createRefreshStatus("Refresh failed.", message),
+        );
       } finally {
         if (refreshAbortControllerRef.current === controller) {
           refreshAbortControllerRef.current = null;
@@ -232,7 +238,13 @@ export function HomeContent({
         }
       }
     },
-    [autoRefreshEnabled, canRefreshDashboards, hasVisibleDashboardData, runtimeConfig],
+    [
+      autoRefreshEnabled,
+      canRefreshDashboards,
+      hasVisibleDashboardData,
+      lastDashboardUpdatedAt,
+      runtimeConfig,
+    ],
   );
 
   useEffect(() => {
@@ -376,11 +388,7 @@ export function HomeContent({
     setBackgroundRefreshPending(false);
     setRuntimeDashboardError("");
     setNextRefreshAt(autoRefreshEnabled ? Date.now() : 0);
-    setRefreshStatusText(
-      autoRefreshEnabled
-        ? "Browser settings saved. Live refresh is ready."
-        : "Browser settings saved. Use Refresh now or enable automatic refresh.",
-    );
+    setRefreshStatus(buildIdleRefreshStatus(savedSources.length, lastDashboardUpdatedAt));
   }
 
   function handleClearRuntimeConfig() {
@@ -392,8 +400,9 @@ export function HomeContent({
     setBackgroundRefreshPending(false);
     setRuntimeDashboardError("");
     setLoadedDashboards([]);
+    setLastDashboardUpdatedAt(null);
     setNextRefreshAt(0);
-    setRefreshStatusText("Save browser settings to enable live refresh.");
+    setRefreshStatus(createRefreshStatus("Save browser settings."));
   }
 
   function handleManualRefresh() {
@@ -411,11 +420,7 @@ export function HomeContent({
     setAutoRefreshEnabled(nextValue);
     window.localStorage.setItem(autoRefreshEnabledStorageKey, JSON.stringify(nextValue));
     setNextRefreshAt(nextValue ? Date.now() : 0);
-    setRefreshStatusText(
-      nextValue
-        ? `Automatic refresh enabled. Refresh runs every ${formatRefreshInterval(autoRefreshIntervalMs)}.`
-        : "Automatic refresh disabled. Use Refresh now whenever you want to update the dashboard.",
-    );
+    setRefreshStatus(buildIdleRefreshStatus(savedSources.length, lastDashboardUpdatedAt));
   }
 
   const handleScheduleTriggered = useCallback(() => {
@@ -455,13 +460,20 @@ export function HomeContent({
           throw new Error(payload.message || "Unable to reload that project.");
         }
 
+        const refreshedAt = new Date().toISOString();
         setLoadedDashboards((currentDashboards) =>
           replaceDashboardBySourceId(currentDashboards, payload.dashboard!),
         );
+        setLastDashboardUpdatedAt(refreshedAt);
         setRuntimeDashboardError("");
         setBackgroundRefreshPending(false);
         setNextRefreshAt(autoRefreshEnabled ? Date.now() + autoRefreshIntervalMs : 0);
-        setRefreshStatusText(`Reloaded ${projectName}.`);
+        setRefreshStatus(
+          createLastUpdatedRefreshStatus(
+            refreshedAt,
+            `Reloaded ${projectName} at ${formatSnapshotTimestamp(refreshedAt)}.`,
+          ),
+        );
 
         return {
           status: "success",
@@ -598,7 +610,8 @@ export function HomeContent({
           manualCooldownRemainingMs={manualCooldownRemainingMs}
           onRefresh={handleManualRefresh}
           onToggleAutoRefresh={handleToggleAutoRefresh}
-          statusText={refreshStatusText}
+          statusDetail={refreshStatus.detail}
+          statusLabel={refreshStatus.label}
         />
       ) : null}
 
@@ -756,22 +769,6 @@ function subscribeToHydration() {
   return () => undefined;
 }
 
-function formatRefreshInterval(valueMs: number) {
-  const totalSeconds = Math.max(1, Math.round(valueMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  if (!minutes) {
-    return `${seconds} seconds`;
-  }
-
-  if (!seconds) {
-    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  }
-
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
-
 function formatCountdown(valueMs: number) {
   const totalSeconds = Math.max(1, Math.ceil(valueMs / 1000));
   return `${totalSeconds}s`;
@@ -788,39 +785,118 @@ function createEmptyDashboardSnapshotSummary(): DashboardSnapshotSummary {
   };
 }
 
-function buildDashboardRefreshMessage(
-  trigger: "auto" | "followup" | "initial" | "manual",
+function createRefreshStatus(
+  label: string,
+  detail = label,
+): RefreshStatus {
+  return {
+    detail,
+    label,
+  };
+}
+
+function buildIdleRefreshStatus(savedSourceCount: number, lastUpdatedAt: string | null) {
+  if (lastUpdatedAt) {
+    return createLastUpdatedRefreshStatus(
+      lastUpdatedAt,
+      `Dashboard updated at ${formatSnapshotTimestamp(lastUpdatedAt)}.`,
+    );
+  }
+
+  if (!savedSourceCount) {
+    return createRefreshStatus("Add a saved source.");
+  }
+
+  return createRefreshStatus("Ready to refresh.");
+}
+
+function createLastUpdatedRefreshStatus(lastUpdatedAt: string, detail: string) {
+  return createRefreshStatus(
+    `Last updated ${formatRefreshTimestamp(lastUpdatedAt)}`,
+    detail,
+  );
+}
+
+function buildLoadingRefreshStatus(trigger: RefreshTrigger, lastUpdatedAt: string | null) {
+  if (lastUpdatedAt) {
+    return createLastUpdatedRefreshStatus(
+      lastUpdatedAt,
+      trigger === "followup"
+        ? `Checking for the latest refresh. Current snapshot is from ${formatSnapshotTimestamp(lastUpdatedAt)}.`
+        : `Refreshing now. Current snapshot is from ${formatSnapshotTimestamp(lastUpdatedAt)}.`,
+    );
+  }
+
+  return createRefreshStatus(
+    trigger === "initial" ? "Loading dashboard." : "Refreshing now.",
+  );
+}
+
+function buildDashboardRefreshStatus(
+  trigger: RefreshTrigger,
   snapshotSummary: DashboardSnapshotSummary,
 ) {
   if (snapshotSummary.status === "refreshing") {
     if (snapshotSummary.lastUpdatedAt) {
-      return `Showing the last saved snapshot from ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)} while a background refresh runs.`;
+      return createLastUpdatedRefreshStatus(
+        snapshotSummary.lastUpdatedAt,
+        `Showing the last saved snapshot from ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)} while a background refresh runs.`,
+      );
     }
 
-    return "Refreshing the dashboard in the background.";
+    return createRefreshStatus(
+      "Refreshing in the background.",
+      "Refreshing the dashboard in the background.",
+    );
   }
 
   if (snapshotSummary.status === "stale") {
     if (snapshotSummary.lastUpdatedAt) {
-      return `Showing the last saved snapshot from ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`;
+      return createLastUpdatedRefreshStatus(
+        snapshotSummary.lastUpdatedAt,
+        `Showing the last saved snapshot from ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`,
+      );
     }
 
-    return "Showing the last saved snapshot.";
+    return createRefreshStatus(
+      "Showing the saved snapshot.",
+      "Showing the last saved snapshot.",
+    );
   }
 
   if (trigger === "manual") {
-    return "Dashboard refreshed manually.";
+    return snapshotSummary.lastUpdatedAt
+      ? createLastUpdatedRefreshStatus(
+          snapshotSummary.lastUpdatedAt,
+          `Dashboard refreshed at ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`,
+        )
+      : createRefreshStatus("Refresh complete.", "Dashboard refreshed manually.");
   }
 
   if (trigger === "followup") {
-    return "Background refresh complete.";
+    return snapshotSummary.lastUpdatedAt
+      ? createLastUpdatedRefreshStatus(
+          snapshotSummary.lastUpdatedAt,
+          `Background refresh complete. Updated at ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`,
+        )
+      : createRefreshStatus("Refresh complete.", "Background refresh complete.");
   }
 
   if (trigger === "initial") {
-    return "Live dashboard loaded.";
+    return snapshotSummary.lastUpdatedAt
+      ? createLastUpdatedRefreshStatus(
+          snapshotSummary.lastUpdatedAt,
+          `Live dashboard loaded at ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`,
+        )
+      : createRefreshStatus("Dashboard loaded.", "Live dashboard loaded.");
   }
 
-  return "Automatic refresh complete.";
+  return snapshotSummary.lastUpdatedAt
+    ? createLastUpdatedRefreshStatus(
+        snapshotSummary.lastUpdatedAt,
+        `Automatic refresh complete. Updated at ${formatSnapshotTimestamp(snapshotSummary.lastUpdatedAt)}.`,
+      )
+    : createRefreshStatus("Refresh complete.", "Automatic refresh complete.");
 }
 
 function formatSnapshotTimestamp(value: string) {
@@ -830,6 +906,31 @@ function formatSnapshotTimestamp(value: string) {
   }
 
   return parsed.toLocaleString();
+}
+
+function formatRefreshTimestamp(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "recently";
+  }
+
+  const today = new Date();
+  const isSameDay =
+    parsed.getFullYear() === today.getFullYear() &&
+    parsed.getMonth() === today.getMonth() &&
+    parsed.getDate() === today.getDate();
+
+  if (isSameDay) {
+    return parsed.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  return parsed.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function mergeDashboardsPreservingSuccess(

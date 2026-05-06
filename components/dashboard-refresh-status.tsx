@@ -6,7 +6,8 @@ type DashboardRefreshStatusProps = {
   manualCooldownRemainingMs: number;
   onRefresh: () => void;
   onToggleAutoRefresh: () => void;
-  statusText: string;
+  statusDetail: string;
+  statusLabel: string;
 };
 
 export function DashboardRefreshStatus({
@@ -15,7 +16,8 @@ export function DashboardRefreshStatus({
   manualCooldownRemainingMs,
   onRefresh,
   onToggleAutoRefresh,
-  statusText,
+  statusDetail,
+  statusLabel,
 }: DashboardRefreshStatusProps) {
   const manualRefreshDisabled = isLoading || manualCooldownRemainingMs > 0;
   const refreshLabel = isLoading
@@ -25,8 +27,8 @@ export function DashboardRefreshStatus({
       : "Refresh now";
 
   return (
-    <aside aria-live="polite" className="refresh-dock" role="status">
-      <span className="sr-only">{statusText}</span>
+    <aside aria-atomic="true" aria-live="polite" className="refresh-dock" role="status">
+      <span className="sr-only">{statusDetail}</span>
       <div className="refresh-dock-row">
         <button
           aria-pressed={autoRefreshEnabled}
@@ -45,6 +47,9 @@ export function DashboardRefreshStatus({
           {refreshLabel}
         </button>
       </div>
+      <p className="refresh-dock-status helper-text" title={statusDetail}>
+        {statusLabel}
+      </p>
     </aside>
   );
 }

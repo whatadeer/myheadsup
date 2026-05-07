@@ -123,7 +123,9 @@ export type SonarProjectSummary = {
   projectKey: string;
   dashboardUrl: string;
   qualityGateStatus: "passed" | "failed" | "unknown";
+  securityIssues: number | null;
   coverage: number | null;
+  coverageHistory: SonarMetricHistoryPoint[];
   bugs: number | null;
   bugHistory: SonarMetricHistoryPoint[];
   vulnerabilities: number | null;

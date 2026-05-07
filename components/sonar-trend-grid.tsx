@@ -5,7 +5,10 @@ type SonarTrendGridProps = {
 };
 
 export function SonarTrendGrid({ sonar }: SonarTrendGridProps) {
-  const hasTrendData = sonar.bugHistory.length > 1 || sonar.codeSmellHistory.length > 1;
+  const hasTrendData =
+    sonar.coverageHistory.length > 1 ||
+    sonar.bugHistory.length > 1 ||
+    sonar.codeSmellHistory.length > 1;
 
   if (!hasTrendData) {
     return null;
@@ -13,11 +16,20 @@ export function SonarTrendGrid({ sonar }: SonarTrendGridProps) {
 
   return (
     <div className="sonar-trend-grid">
+      <SonarTrendCard
+        currentValue={sonar.coverage}
+        detailFormatter={formatCoverageDelta}
+        label="Coverage"
+        points={sonar.coverageHistory}
+        valueFormatter={formatCoverageValue}
+      />
       <SonarTrendCard currentValue={sonar.bugs} label="Bugs" points={sonar.bugHistory} />
       <SonarTrendCard
         currentValue={sonar.codeSmells}
+        detailFormatter={formatCountDelta}
         label="Code smells"
         points={sonar.codeSmellHistory}
+        valueFormatter={formatCountValue}
       />
     </div>
   );
@@ -25,12 +37,16 @@ export function SonarTrendGrid({ sonar }: SonarTrendGridProps) {
 
 function SonarTrendCard({
   currentValue,
+  detailFormatter = formatCountDelta,
   label,
   points,
+  valueFormatter = formatCountValue,
 }: {
   currentValue: number | null;
+  detailFormatter?: (delta: number) => string;
   label: string;
   points: SonarMetricHistoryPoint[];
+  valueFormatter?: (value: number) => string;
 }) {
   const latestPoint = points[points.length - 1];
   const earliestPoint = points[0];
@@ -45,14 +61,30 @@ function SonarTrendCard({
     <div className="sonar-trend-card">
       <div className="sonar-trend-header">
         <span className="sonar-trend-label">{label}</span>
-        <span className="sonar-trend-value">{currentValue ?? latestPoint.value}</span>
+        <span className="sonar-trend-value">{valueFormatter(currentValue ?? latestPoint.value)}</span>
       </div>
       <Sparkline points={points} />
-      <span className="sonar-trend-detail">
-        {delta === 0 ? "Flat" : `${delta > 0 ? "+" : ""}${delta} over recent analyses`}
-      </span>
+      <span className="sonar-trend-detail">{detailFormatter(delta)}</span>
     </div>
   );
+}
+
+function formatCountValue(value: number) {
+  return String(value);
+}
+
+function formatCoverageValue(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
+function formatCountDelta(delta: number) {
+  return delta === 0 ? "Flat" : `${delta > 0 ? "+" : ""}${delta} over recent analyses`;
+}
+
+function formatCoverageDelta(delta: number) {
+  return delta === 0
+    ? "Flat"
+    : `${delta > 0 ? "+" : ""}${delta.toFixed(1)} pts over recent analyses`;
 }
 
 function Sparkline({ points }: { points: SonarMetricHistoryPoint[] }) {

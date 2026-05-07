@@ -73,7 +73,7 @@ async function tryFetchSonarProjectSummary(
   projectKey: string,
   runtimeConfig?: RuntimeConfig | null,
 ): Promise<SonarProjectSummary | null> {
-  const [qualityGate, measures, history] = await Promise.all([
+  const [qualityGate, measures, history, securityIssues] = await Promise.all([
     fetchSonarQube<SonarQualityGateResponse>(
       `/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`,
       runtimeConfig,
@@ -83,12 +83,13 @@ async function tryFetchSonarProjectSummary(
       runtimeConfig,
     ),
     fetchSonarQube<SonarHistoryResponse>(
-      `/api/measures/search_history?component=${encodeURIComponent(projectKey)}&metrics=bugs,code_smells&ps=12`,
+      `/api/measures/search_history?component=${encodeURIComponent(projectKey)}&metrics=coverage,bugs,code_smells&ps=12`,
       runtimeConfig,
     ),
+    fetchSonarSecurityIssues(projectKey, runtimeConfig),
   ]).catch((error: unknown) => {
     if (isSonarNotFoundError(error)) {
-      return [null, null, null] as const;
+      return [null, null, null, null] as const;
     }
 
     throw error;
@@ -109,7 +110,9 @@ async function tryFetchSonarProjectSummary(
     projectKey,
     dashboardUrl: buildSonarDashboardUrl(projectKey, runtimeConfig),
     qualityGateStatus: normalizeQualityGateStatus(qualityGate.projectStatus?.status),
+    securityIssues,
     coverage: parseNumberMetric(measureMap.get("coverage")),
+    coverageHistory: parseMetricHistory(historyMap.get("coverage"), parseNumberMetric),
     bugs: parseIntegerMetric(measureMap.get("bugs")),
     bugHistory: parseMetricHistory(historyMap.get("bugs"), parseIntegerMetric),
     vulnerabilities: parseIntegerMetric(measureMap.get("vulnerabilities")),
@@ -117,6 +120,33 @@ async function tryFetchSonarProjectSummary(
     codeSmellHistory: parseMetricHistory(historyMap.get("code_smells"), parseIntegerMetric),
     duplicatedLinesDensity: parseNumberMetric(measureMap.get("duplicated_lines_density")),
   };
+}
+
+async function fetchSonarSecurityIssues(
+  projectKey: string,
+  runtimeConfig?: RuntimeConfig | null,
+): Promise<number | null> {
+  for (const metricKey of ["software_quality_security_issues", "security_issues"]) {
+    try {
+      const response = await fetchSonarQube<SonarMeasuresResponse>(
+        `/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKey}`,
+        runtimeConfig,
+      );
+      return parseIntegerMetric(response.component?.measures?.[0]?.value);
+    } catch (error) {
+      if (isSonarNotFoundError(error)) {
+        return null;
+      }
+
+      if (error instanceof Error && /^SONARQUBE_400:/i.test(error.message)) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return null;
 }
 
 async function fetchSonarQube<T>(

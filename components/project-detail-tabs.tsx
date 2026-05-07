@@ -294,7 +294,7 @@ function SonarPanel({ project }: { project: ProjectSummary }) {
       <div className="summary-row">
         <span>{formatPercent(project.sonar.coverage, "coverage")}</span>
         <span>{formatCount(project.sonar.bugs, "bug")}</span>
-        <span>{formatCount(project.sonar.vulnerabilities, "vulnerability")}</span>
+        <span>{formatSonarSecurity(project.sonar.securityIssues)}</span>
         <span>{formatCount(project.sonar.codeSmells, "smell")}</span>
         <span>{formatPercent(project.sonar.duplicatedLinesDensity, "duplication")}</span>
       </div>
@@ -369,4 +369,12 @@ function formatPercent(value: number | null, label: string) {
   }
 
   return `${value.toFixed(1)}% ${label}`;
+}
+
+function formatSonarSecurity(securityIssues: number | null) {
+  if (securityIssues === null) {
+    return "Security unknown";
+  }
+
+  return `${securityIssues} security`;
 }

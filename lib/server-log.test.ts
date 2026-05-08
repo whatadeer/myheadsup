@@ -4,10 +4,12 @@ import { logServerExternalRequest, logServerRequest } from "./server-log";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalAccessLogs = process.env.ACCESS_LOGS;
+const logTimestamp = "2026-05-08T20:15:00.000Z";
 
 afterEach(() => {
   process.env.NODE_ENV = originalNodeEnv;
   restoreEnv("ACCESS_LOGS", originalAccessLogs);
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -15,6 +17,8 @@ describe("logServerRequest", () => {
   it("logs requests in production by default", () => {
     process.env.NODE_ENV = "production";
     restoreEnv("ACCESS_LOGS", undefined);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(logTimestamp));
 
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -30,6 +34,7 @@ describe("logServerRequest", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       "[myheadsup:http-request:info]",
       JSON.stringify({
+        timestamp: logTimestamp,
         message: "Incoming request",
         hasSearch: true,
         method: "GET",
@@ -42,6 +47,8 @@ describe("logServerRequest", () => {
   it("does not log requests in development by default", () => {
     process.env.NODE_ENV = "development";
     restoreEnv("ACCESS_LOGS", undefined);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(logTimestamp));
 
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -60,6 +67,8 @@ describe("logServerRequest", () => {
   it("allows request logging to be disabled explicitly", () => {
     process.env.NODE_ENV = "production";
     process.env.ACCESS_LOGS = "false";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(logTimestamp));
 
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -80,6 +89,8 @@ describe("logServerExternalRequest", () => {
   it("logs external requests in production by default", () => {
     process.env.NODE_ENV = "production";
     restoreEnv("ACCESS_LOGS", undefined);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(logTimestamp));
 
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -93,6 +104,7 @@ describe("logServerExternalRequest", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       "[myheadsup:gitlab-request:info]",
       JSON.stringify({
+        timestamp: logTimestamp,
         message: "Outgoing request completed",
         baseUrl: "https://gitlab.example.com",
         method: "POST",
@@ -105,6 +117,8 @@ describe("logServerExternalRequest", () => {
   it("includes the active request id in correlated logs", () => {
     process.env.NODE_ENV = "production";
     restoreEnv("ACCESS_LOGS", undefined);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(logTimestamp));
 
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -127,6 +141,7 @@ describe("logServerExternalRequest", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       "[myheadsup:gitlab-request:info]",
       JSON.stringify({
+        timestamp: logTimestamp,
         message: "Outgoing request completed",
         requestId: "req-456",
         baseUrl: "https://gitlab.example.com",
@@ -140,6 +155,8 @@ describe("logServerExternalRequest", () => {
   it("does not log external requests when access logs are disabled", () => {
     process.env.NODE_ENV = "production";
     process.env.ACCESS_LOGS = "false";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(logTimestamp));
 
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 

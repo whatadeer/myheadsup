@@ -417,6 +417,50 @@ a.hero-integration:hover {
   }
 }
 
+.undo-notice {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border-color: $warning-border;
+  background: $warning-surface;
+
+  &-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  &-copy {
+    display: grid;
+    gap: 4px;
+  }
+
+  &-title {
+    font-weight: 700;
+    color: $warning-text;
+  }
+
+  &-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &-undo {
+    min-height: 40px;
+    padding: 10px 16px;
+  }
+
+  .helper-text,
+  .form-message {
+    color: $warning-text;
+  }
+}
+
 .setup-prompt {
   background: var(--surface-muted);
 }

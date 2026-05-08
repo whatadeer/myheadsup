@@ -1,7 +1,13 @@
 "use client";
 
 import { useActionState, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { addSourceAction, removeSourceAction, updateGroupDefinitionAction } from "@/app/actions";
+import {
+  addSourceAction,
+  dismissLastRemovedSourceAction,
+  removeSourceAction,
+  restoreLastRemovedSourceAction,
+  updateGroupDefinitionAction,
+} from "@/app/actions";
 import { DashboardRefreshStatus } from "@/components/dashboard-refresh-status";
 import { GroupTreeFilter } from "@/components/group-tree-filter";
 import { JiraProjectLinks } from "@/components/jira-project-links";
@@ -20,6 +26,7 @@ import type {
   DashboardResponsePayload,
   DashboardSnapshotSummary,
   ProjectRefreshResponsePayload,
+  RemovedSourceUndo,
   RuntimeConfig,
   SavedSource,
   SourceDashboard,
@@ -42,6 +49,7 @@ type RefreshStatus = {
 };
 
 type HomeContentProps = {
+  lastRemovedSource: RemovedSourceUndo | null;
   savedSources: SavedSource[];
   serverConfigError: string | null;
   showDebugUrls: boolean;
@@ -53,6 +61,7 @@ type HomeContentProps = {
 };
 
 export function HomeContent({
+  lastRemovedSource,
   savedSources,
   serverConfigError,
   showDebugUrls,
@@ -566,6 +575,10 @@ export function HomeContent({
           )}
         </div>
       </details>
+
+      {lastRemovedSource ? (
+        <UndoRemovedSourceNotice lastRemovedSource={lastRemovedSource} />
+      ) : null}
 
       {!savedSources.length ? (
         <section className="panel empty-state">
@@ -1243,6 +1256,46 @@ function RemoveSourceButton({ sourceId }: { sourceId: string }) {
         Remove
       </button>
     </form>
+  );
+}
+
+function UndoRemovedSourceNotice({
+  lastRemovedSource,
+}: {
+  lastRemovedSource: RemovedSourceUndo;
+}) {
+  const [state, formAction, pending] = useActionState(
+    restoreLastRemovedSourceAction,
+    initialActionState,
+  );
+  const sourceLabel = lastRemovedSource.source.kind === "group" ? "group" : "project";
+
+  return (
+    <section aria-live="polite" className="panel undo-notice">
+      <div className="undo-notice-body">
+        <div className="undo-notice-copy">
+          <span className="undo-notice-title">
+            Removed {lastRemovedSource.source.name} from your saved {sourceLabel} list.
+          </span>
+          <span className="helper-text">
+            Undo restores the saved query, exclusions, and project overrides.
+          </span>
+        </div>
+        <div className="undo-notice-actions">
+          <form action={formAction}>
+            <button className="button undo-notice-undo" disabled={pending} type="submit">
+              {pending ? "Restoring..." : "Undo"}
+            </button>
+          </form>
+          <form action={dismissLastRemovedSourceAction}>
+            <button className="subtle-action-button" disabled={pending} type="submit">
+              Dismiss
+            </button>
+          </form>
+        </div>
+      </div>
+      {state.message ? <span className={`form-message ${state.status}`}>{state.message}</span> : null}
+    </section>
   );
 }
 

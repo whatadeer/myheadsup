@@ -54,6 +54,11 @@ export type SavedSource = {
   createdAt: string;
 };
 
+export type RemovedSourceUndo = {
+  source: SavedSource;
+  removedAt: string;
+};
+
 export type GitLabGroupRef = {
   id: number;
   name: string;

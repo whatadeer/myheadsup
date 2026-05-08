@@ -1,12 +1,15 @@
 import { HomeContent } from "@/components/home-content";
 import { getGitLabConfigError } from "@/lib/gitlab";
 import { getServerEnvValue } from "@/lib/server-env";
-import { readSources } from "@/lib/store";
+import { readLastRemovedSource, readSources } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const savedSources = await readSources();
+  const [lastRemovedSource, savedSources] = await Promise.all([
+    readLastRemovedSource(),
+    readSources(),
+  ]);
   const configError = getGitLabConfigError();
   const debugMode = getServerEnvValue("DEBUG_MODE").toLowerCase() === "true";
   const serverUrls = {
@@ -18,6 +21,7 @@ export default async function Home() {
   return (
     <HomeContent
       key={buildHomeContentKey(savedSources, configError)}
+      lastRemovedSource={lastRemovedSource}
       savedSources={savedSources}
       showDebugUrls={debugMode}
       serverConfigError={configError}

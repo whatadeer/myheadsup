@@ -7,6 +7,7 @@ export function logServerError(scope: string, error: unknown, context?: LogConte
   console.error(
     formatLogPrefix(scope, "error"),
     JSON.stringify({
+      timestamp: getLogTimestamp(),
       ...(requestContext ?? {}),
       ...(context ?? {}),
       error: serializeError(error),
@@ -36,6 +37,7 @@ function writeInfoLog(
   console.info(
     formatLogPrefix(scope, level),
     JSON.stringify({
+      timestamp: getLogTimestamp(),
       message,
       ...(requestContext ?? {}),
       ...(context ?? {}),
@@ -84,6 +86,10 @@ export function logServerExternalRequest(
 
 function formatLogPrefix(scope: string, level: "debug" | "error" | "info") {
   return `[myheadsup:${scope}:${level}]`;
+}
+
+function getLogTimestamp() {
+  return new Date().toISOString();
 }
 
 function isAccessLoggingEnabled() {

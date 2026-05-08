@@ -9,8 +9,10 @@ import { parseSourceQuery } from "@/lib/source-query";
 import {
   addSource,
   addSourceExclusion,
+  discardLastRemovedSource,
   readSources,
   removeSource,
+  restoreLastRemovedSource,
   saveSourceProjectJiraOverride,
   saveSourceProjectSonarOverride,
   updateSourceDefinition,
@@ -139,7 +141,52 @@ export async function removeSourceAction(formData: FormData) {
     return;
   }
 
-  await removeSource(sourceId);
+  const removedSource = await removeSource(sourceId);
+
+  if (!removedSource) {
+    return;
+  }
+
+  revalidatePath("/");
+}
+
+export async function restoreLastRemovedSourceAction(
+  _previousState: ActionState,
+  _formData: FormData,
+): Promise<ActionState> {
+  void _previousState;
+  void _formData;
+
+  try {
+    const result = await restoreLastRemovedSource();
+
+    if (result.status === "missing") {
+      return {
+        status: "error",
+        message: "There is no removed group or project to restore.",
+      };
+    }
+
+    revalidatePath("/");
+
+    return {
+      status: "success",
+      message:
+        result.status === "restored"
+          ? `Restored ${result.source.name}.`
+          : `${result.source.name} is already back in the list.`,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message:
+        error instanceof Error ? error.message : "Unable to restore that saved source.",
+    };
+  }
+}
+
+export async function dismissLastRemovedSourceAction() {
+  await discardLastRemovedSource();
   revalidatePath("/");
 }
 

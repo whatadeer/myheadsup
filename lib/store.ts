@@ -10,6 +10,7 @@ import {
 } from "./source-query";
 import { normalizeJiraProjectKeys } from "./jira";
 import type {
+  RemovedSourceUndo,
   SavedSource,
   SavedSourceExclusion,
   SavedSourceProjectJiraOverride,
@@ -20,14 +21,24 @@ const dataDirectory = path.join(process.cwd(), "data");
 const dataFile = path.join(dataDirectory, "sources.json");
 
 type StoreShape = {
+  lastRemovedSource: RemovedSourceUndo | null;
   sources: SavedSource[];
 };
+
+export type RestoreRemovedSourceResult =
+  | { status: "missing" }
+  | { status: "already-present" | "restored"; source: SavedSource };
 
 export async function readSources() {
   const store = await readStore();
   return [...store.sources].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt),
   );
+}
+
+export async function readLastRemovedSource() {
+  const store = await readStore();
+  return store.lastRemovedSource;
 }
 
 export async function addSource(
@@ -70,13 +81,62 @@ export async function addSource(
 
 export async function removeSource(sourceId: string) {
   const store = await readStore();
-  const sources = store.sources.filter((source) => source.id !== sourceId);
+  const removedSource = store.sources.find((source) => source.id === sourceId);
 
-  if (sources.length === store.sources.length) {
+  if (!removedSource) {
+    return null;
+  }
+
+  store.sources = store.sources.filter((source) => source.id !== sourceId);
+  store.lastRemovedSource = {
+    removedAt: new Date().toISOString(),
+    source: removedSource,
+  };
+  await writeStore(store);
+  return removedSource;
+}
+
+export async function restoreLastRemovedSource(): Promise<RestoreRemovedSourceResult> {
+  const store = await readStore();
+  const removedSource = store.lastRemovedSource?.source;
+
+  if (!removedSource) {
+    return { status: "missing" };
+  }
+
+  const existingSource = store.sources.find(
+    (source) =>
+      source.id === removedSource.id ||
+      (source.kind === removedSource.kind && source.gitlabId === removedSource.gitlabId),
+  );
+
+  store.lastRemovedSource = null;
+
+  if (existingSource) {
+    await writeStore(store);
+    return {
+      source: existingSource,
+      status: "already-present",
+    };
+  }
+
+  store.sources.push(removedSource);
+  await writeStore(store);
+  return {
+    source: removedSource,
+    status: "restored",
+  };
+}
+
+export async function discardLastRemovedSource() {
+  const store = await readStore();
+
+  if (!store.lastRemovedSource) {
     return;
   }
 
-  await writeStore({ sources });
+  store.lastRemovedSource = null;
+  await writeStore(store);
 }
 
 export async function updateSourceDefinition(
@@ -260,43 +320,11 @@ async function readStore(): Promise<StoreShape> {
   const parsed = JSON.parse(raw) as Partial<StoreShape>;
 
   return {
+    lastRemovedSource: normalizeRemovedSourceUndo(parsed.lastRemovedSource),
     sources: Array.isArray(parsed.sources)
-        ? parsed.sources.map((source) => ({
-            ...source,
-            exclusions: normalizeExclusions(source?.exclusions),
-            projectJiraOverrides: normalizeProjectJiraOverrides(source?.projectJiraOverrides),
-            projectSonarOverrides: normalizeProjectSonarOverrides(source?.projectSonarOverrides),
-            query:
-              typeof source?.query === "string" && source.query.trim()
-              ? source.query.trim()
-              : buildSourceQuery(
-                  source?.kind === "group" || source?.kind === "project"
-                    ? source.kind
-                   : "source",
-                   typeof source?.reference === "string" ? source.reference : "",
-                   normalizeExclusions(source?.exclusions),
-                   source?.kind === "project"
-                     ? normalizeJiraProjectKeys(source?.jiraProjectKeys)
-                     : [],
-                   source?.kind === "project" &&
-                     typeof source?.sonarProjectKey === "string" &&
-                     source.sonarProjectKey.trim()
-                     ? source.sonarProjectKey.trim()
-                     : null,
-                   normalizeProjectJiraOverrides(source?.projectJiraOverrides),
-                   normalizeProjectSonarOverrides(source?.projectSonarOverrides),
-                 ),
-          jiraProjectKeys:
-            source?.kind === "project"
-              ? normalizeJiraProjectKeys(source?.jiraProjectKeys)
-              : [],
-          sonarProjectKey:
-            source?.kind === "project" &&
-            typeof source?.sonarProjectKey === "string" &&
-            source.sonarProjectKey.trim()
-              ? source.sonarProjectKey.trim()
-              : null,
-        }))
+      ? parsed.sources
+          .map((source) => normalizeStoredSource(source))
+          .filter((source): source is SavedSource => Boolean(source))
       : [],
   };
 }
@@ -334,6 +362,89 @@ function normalizeSource(source: Omit<SavedSource, "id" | "createdAt" | "query">
     ),
     jiraProjectKeys,
     sonarProjectKey,
+  };
+}
+
+function normalizeStoredSource(source: Partial<SavedSource> | null | undefined): SavedSource | null {
+  if (
+    !source ||
+    (source.kind !== "group" && source.kind !== "project") ||
+    typeof source.gitlabId !== "number" ||
+    typeof source.id !== "string" ||
+    !source.id.trim() ||
+    typeof source.name !== "string" ||
+    !source.name.trim() ||
+    typeof source.reference !== "string" ||
+    !source.reference.trim() ||
+    typeof source.webUrl !== "string" ||
+    !source.webUrl.trim() ||
+    typeof source.createdAt !== "string" ||
+    !source.createdAt.trim()
+  ) {
+    return null;
+  }
+
+  const exclusions = normalizeExclusions(source.exclusions);
+  const projectJiraOverrides = normalizeProjectJiraOverrides(source.projectJiraOverrides);
+  const projectSonarOverrides = normalizeProjectSonarOverrides(source.projectSonarOverrides);
+  const jiraProjectKeys = source.kind === "project" ? normalizeJiraProjectKeys(source.jiraProjectKeys) : [];
+  const sonarProjectKey =
+    source.kind === "project" &&
+    typeof source.sonarProjectKey === "string" &&
+    source.sonarProjectKey.trim()
+      ? source.sonarProjectKey.trim()
+      : null;
+
+  return {
+    createdAt: source.createdAt.trim(),
+    exclusions,
+    gitlabId: source.gitlabId,
+    id: source.id.trim(),
+    jiraProjectKeys,
+    kind: source.kind,
+    name: source.name.trim(),
+    projectJiraOverrides,
+    projectSonarOverrides,
+    query:
+      typeof source.query === "string" && source.query.trim()
+        ? source.query.trim()
+        : buildSourceQuery(
+            source.kind,
+            source.reference,
+            exclusions,
+            jiraProjectKeys,
+            sonarProjectKey,
+            projectJiraOverrides,
+            projectSonarOverrides,
+          ),
+    reference: source.reference.trim(),
+    sonarProjectKey,
+    webUrl: source.webUrl.trim(),
+  };
+}
+
+function normalizeRemovedSourceUndo(value: unknown): RemovedSourceUndo | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as {
+    removedAt?: unknown;
+    source?: Partial<SavedSource>;
+  };
+  const source = normalizeStoredSource(candidate.source);
+
+  if (
+    !source ||
+    typeof candidate.removedAt !== "string" ||
+    !candidate.removedAt.trim()
+  ) {
+    return null;
+  }
+
+  return {
+    removedAt: candidate.removedAt.trim(),
+    source,
   };
 }
 
@@ -514,7 +625,7 @@ async function ensureStore() {
   } catch {
     await writeFile(
       dataFile,
-      JSON.stringify({ sources: [] }, null, 2),
+      JSON.stringify({ lastRemovedSource: null, sources: [] }, null, 2),
       "utf8",
     );
   }
